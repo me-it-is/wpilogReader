@@ -1,4 +1,3 @@
-use core::net;
 use std::{fs::File, io::Read, time::Duration, usize};
 
 static WPILOG_PATH: &str = "test.wpilog";
