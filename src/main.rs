@@ -14,6 +14,7 @@ enum WpilogReadErrors {
     NoDataLeft,
     InvalidHeader,
     InvalidRecoard,
+    UnsupportedWpilogVersion,
 }
 
 struct Record {
@@ -70,16 +71,19 @@ fn read_wpilog(path: &str) -> Result<Wpilog, WpilogReadErrors> {
         Ok(n) => _ = n,
         Err(_) => return Err(WpilogReadErrors::ReadError),
     };
-    println!("{}", file_content.len());
 
     let mut file_to_read: (Vec<u8>, usize) = (file_content, 0);
     let header = read_header(&mut file_to_read)?;
 
-    let records = read_next_record(&mut file_to_read)?;
+    let mut records: Vec<Record> = Vec::new();
+
+    loop {
+        match read_next_record(&mut file_to_read) { Ok(r) => records.push(r), Err(_) => break}
+    }
 
     return Ok(Wpilog {
         header: header,
-        records: vec![records],
+        records: records,
     });
 }
 
@@ -91,8 +95,12 @@ fn read_header(file: &mut (Vec<u8>, usize)) -> Result<FileHeader, WpilogReadErro
     {
         return Err(WpilogReadErrors::InvalidHeader);
     }
+    let raw_version_number = next_chunk(file, 2)?.try_into().unwrap();
+    let version_number = u16::from_le_bytes(raw_version_number);
 
-    let version_number = u16::from_le_bytes(next_chunk(file, 2)?.try_into().unwrap());
+    if version_number != 0x0100 {
+        return Err(WpilogReadErrors::UnsupportedWpilogVersion);
+    }
 
     let extra_string_length = u32::from_le_bytes(next_chunk(file, 4)?.try_into().unwrap());
 
@@ -113,17 +121,17 @@ fn read_next_record(file: &mut (Vec<u8>, usize)) -> Result<Record, WpilogReadErr
 
     let entry_id = u32::from_le_bytes(pad_to_n_bytes(next_chunk(
         file,
-        ((header_bit_field & 0b11000000) + 1) as usize,
+        ((header_bit_field & 0b000011) + 1) as usize,
     )?));
 
-    let payload_size = u32::from_le_bytes(pad_to_n_bytes(next_chunk(
-        file,
-        ((header_bit_field & 0b00110000) + 1) as usize,
-    )?));
+    let raw_raw = (((header_bit_field & 0b00001100) >> 2) + 1) as usize;
+
+    let raw_payload_size = pad_to_n_bytes(next_chunk(file, raw_raw)?);
+    let payload_size = u32::from_le_bytes(raw_payload_size);
 
     let timestamp = u64::from_le_bytes(pad_to_n_bytes(next_chunk(
         file,
-        ((header_bit_field & 0b00001110) + 1) as usize,
+        (((header_bit_field & 0b01110000) >> 4) + 1) as usize,
     )?));
 
     let data: RecordData;
@@ -144,7 +152,8 @@ fn read_next_record(file: &mut (Vec<u8>, usize)) -> Result<Record, WpilogReadErr
 }
 
 fn process_control_recoard(file: &mut (Vec<u8>, usize)) -> Result<RecordData, WpilogReadErrors> {
-    let control_type = match next_chunk(file, 1)?[0] {
+    let raw_control_type = next_chunk(file, 1)?[0];
+    let control_type = match raw_control_type {
         0 => ControlTypes::Start,
         1 => ControlTypes::Finish,
         2 => ControlTypes::SetMetadata,
