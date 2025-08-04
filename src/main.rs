@@ -78,7 +78,13 @@ fn read_wpilog(path: &str) -> Result<Wpilog, WpilogReadErrors> {
     let mut records: Vec<Record> = Vec::new();
 
     loop {
-        match read_next_record(&mut file_to_read) { Ok(r) => records.push(r), Err(_) => break}
+        match read_next_record(&mut file_to_read) {
+            Ok(r) => records.push(r),
+            Err(e) => match e {
+                WpilogReadErrors::NoDataLeft => break,
+                _ => return Err(e),
+            },
+        }
     }
 
     return Ok(Wpilog {
