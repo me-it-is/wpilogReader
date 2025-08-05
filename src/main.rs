@@ -12,9 +12,13 @@ struct Wpilog {
 struct EntryData {
     start_record_index: u32,
     name: String,
-    data_type: String,
-    metadata: String,
+    data_type: DataType,
+    metadata: Metadata,
     finish_record_index: Option<u32>,
+}
+#[derive(Debug, Clone)]
+struct Metadata {
+    metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -31,7 +35,7 @@ enum WpilogReadErrors {
     UseOfEntryIdAfterFinish,
     EntryIdAlreadyStarted,
     SetMetadataWithoutStart,
-    FinishWithoutStart
+    FinishWithoutStart,
 }
 #[allow(dead_code)]
 struct Record {
@@ -57,6 +61,22 @@ enum RecordData {
     StringArray(Vec<String>),
     Json(Option<serde_json::Value>),
 }
+#[derive(Debug, Clone)]
+
+enum DataType {
+    Raw,
+    Boolean,
+    Integer,
+    Float,
+    Double,
+    String,
+    BooleanArray,
+    IntegerArray,
+    FloatArray,
+    DoubleArray,
+    StringArray,
+    Json,
+}
 
 enum ControlTypes {
     Start,
@@ -67,8 +87,8 @@ enum ControlTypes {
 struct StartRecordData {
     entry_id_to_be_started: u32,
     entry_name: String,
-    entry_type: String,
-    entry_metadata: String,
+    entry_type: DataType,
+    entry_metadata: Metadata,
 }
 #[allow(dead_code)]
 struct FinishRecordData {
@@ -77,7 +97,7 @@ struct FinishRecordData {
 #[allow(dead_code)]
 struct SetMetaDataRecordData {
     entry_to_be_edited: u32,
-    entry_new_metadata: String,
+    entry_new_metadata: Metadata,
 }
 #[allow(dead_code)]
 struct FileHeader {
@@ -223,42 +243,42 @@ fn process_boolean(byte: [u8; 1]) -> Result<bool, WpilogReadErrors> {
 }
 
 fn process_data_from_standard_record(
-    data_type: &String,
+    data_type: &DataType,
     data: Vec<u8>,
 ) -> Result<RecordData, WpilogReadErrors> {
-    return Ok(match data_type.as_str() {
-        "raw" => RecordData::Raw(data),
-        "boolean" => RecordData::Boolean(process_boolean(data.try_into().unwrap())?),
-        "int64" => RecordData::Integer(i64::from_le_bytes(data.try_into().unwrap())),
-        "float" => RecordData::Float(f32::from_le_bytes(data.try_into().unwrap())),
-        "double" => RecordData::Double(f64::from_le_bytes(data.try_into().unwrap())),
-        "string" => RecordData::String(match String::from_utf8(data) {
+    return Ok(match data_type {
+        DataType::Raw => RecordData::Raw(data),
+        DataType::Boolean => RecordData::Boolean(process_boolean(data.try_into().unwrap())?),
+        DataType::Integer => RecordData::Integer(i64::from_le_bytes(data.try_into().unwrap())),
+        DataType::Float => RecordData::Float(f32::from_le_bytes(data.try_into().unwrap())),
+        DataType::Double => RecordData::Double(f64::from_le_bytes(data.try_into().unwrap())),
+        DataType::String => RecordData::String(match String::from_utf8(data) {
             Ok(s) => s,
             Err(_) => return Err(WpilogReadErrors::MalformedData),
         }),
-        "boolean[]" => RecordData::BooleanArray(process_array_data(data, &(process_boolean))?),
-        "int64[]" => {
+        DataType::BooleanArray => {
+            RecordData::BooleanArray(process_array_data(data, &(process_boolean))?)
+        }
+        DataType::IntegerArray => {
             RecordData::IntegerArray(process_array_data_no_err(data, &i64::from_le_bytes)?)
         }
-        "float[]" => RecordData::FloatArray(process_array_data_no_err(data, &f32::from_le_bytes)?),
-        "double[]" => {
+        DataType::FloatArray => {
+            RecordData::FloatArray(process_array_data_no_err(data, &f32::from_le_bytes)?)
+        }
+        DataType::DoubleArray => {
             RecordData::DoubleArray(process_array_data_no_err(data, &f64::from_le_bytes)?)
         }
-        "string[]" => match process_string_array(data) {
+        DataType::StringArray => match process_string_array(data) {
             Ok(sa) => sa,
             Err(_) => return Err(WpilogReadErrors::MalformedData),
         },
-        "json" => RecordData::Json(match data.len() {
+        DataType::Json => RecordData::Json(match data.len() {
             0 => None,
             _ => match serde_json::from_slice(&data) {
                 Ok(j) => j,
                 Err(_) => return Err(WpilogReadErrors::MalformedData),
             },
         }),
-        str => {
-            //return Err(WpilogReadErrors::UnknownDataType);
-            RecordData::Raw(data)
-        }
     });
 }
 
@@ -306,6 +326,19 @@ fn process_string_array(data: Vec<u8>) -> Result<RecordData, WpilogReadErrors> {
     return Ok(RecordData::StringArray(out));
 }
 
+fn process_metadata(data: Vec<u8>) -> Result<Metadata, WpilogReadErrors> {
+    let metadata;
+    if data.len() == 0 {
+        metadata = None
+    } else {
+        metadata = Some(match serde_json::from_slice(&data) {
+            Ok(j) => j,
+            Err(_) => return Err(WpilogReadErrors::MalformedData),
+        });
+    }
+    return Ok(Metadata { metadata });
+}
+
 fn process_control_record(
     file: &mut (Vec<u8>, usize),
     current_record: u32,
@@ -347,18 +380,34 @@ fn process_start_recoard(
         Err(_) => return Err(WpilogReadErrors::InvalidRecoard),
     };
 
-    let entry_metadata_length = u32::from_le_bytes(next_chunk(file, 4)?.try_into().unwrap());
-    let entry_metadata_string_raw = next_chunk(file, entry_metadata_length as usize)?;
-    let entry_metadata_string = match str::from_utf8(entry_metadata_string_raw.as_slice()) {
-        Ok(s) => s,
-        Err(_) => return Err(WpilogReadErrors::InvalidRecoard),
+    let entry_type = match entry_type_string {
+        "raw" => DataType::Raw,
+        "boolean" => DataType::Boolean,
+        "int64" => DataType::Integer,
+        "float" => DataType::Float,
+        "double" => DataType::Double,
+        "string" => DataType::String,
+        "boolean[]" => DataType::BooleanArray,
+        "int64[]" => DataType::IntegerArray,
+        "float[]" => DataType::FloatArray,
+        "double[]" => DataType::DoubleArray,
+        "string[]" => DataType::StringArray,
+        "json" => DataType::Json,
+        str => {
+            println!("{}", str);
+            DataType::Raw
+        }
     };
+
+    let entry_metadata_length = u32::from_le_bytes(next_chunk(file, 4)?.try_into().unwrap());
+    let entry_metadata_raw = next_chunk(file, entry_metadata_length as usize)?;
+    let entry_metadata = process_metadata(entry_metadata_raw)?;
 
     let entry_data = EntryData {
         start_record_index: current_record,
-        data_type: entry_type_string.to_string(),
+        data_type: entry_type.clone(),
         name: entry_name_string.to_string(),
-        metadata: entry_metadata_string.to_string(),
+        metadata: entry_metadata.clone(),
         finish_record_index: None,
     };
 
@@ -376,12 +425,16 @@ fn process_start_recoard(
     return Ok(RecordData::Start(StartRecordData {
         entry_id_to_be_started,
         entry_name: entry_name_string.to_string(),
-        entry_type: entry_type_string.to_string(),
-        entry_metadata: entry_metadata_string.to_string(),
+        entry_type: entry_type,
+        entry_metadata: entry_metadata,
     }));
 }
 
-fn process_finish_recoard(file: &mut (Vec<u8>, usize),current_record: u32, entry_data_lut: &mut HashMap<u32, Vec<EntryData>>,) -> Result<RecordData, WpilogReadErrors> {
+fn process_finish_recoard(
+    file: &mut (Vec<u8>, usize),
+    current_record: u32,
+    entry_data_lut: &mut HashMap<u32, Vec<EntryData>>,
+) -> Result<RecordData, WpilogReadErrors> {
     println!("finish rec");
     let entry_id_to_be_finished = u32::from_le_bytes(next_chunk(file, 4)?.try_into().unwrap());
 
@@ -411,11 +464,8 @@ fn process_set_metadata_recoard(
     let entry_id_to_set_metadata = u32::from_le_bytes(next_chunk(file, 4)?.try_into().unwrap());
 
     let entry_metadata_length = u32::from_le_bytes(next_chunk(file, 4)?.try_into().unwrap());
-    let entry_metadata_string_raw = next_chunk(file, entry_metadata_length as usize)?;
-    let entry_metadata_string = match str::from_utf8(entry_metadata_string_raw.as_slice()) {
-        Ok(s) => s,
-        Err(_) => return Err(WpilogReadErrors::InvalidRecoard),
-    };
+    let entry_metadata_raw = next_chunk(file, entry_metadata_length as usize)?;
+    let entry_metadata = process_metadata(entry_metadata_raw)?;
 
     let entry = match match entry_data_lut.get_mut(&entry_id_to_set_metadata) {
         None => return Err(WpilogReadErrors::SetMetadataWithoutStart),
@@ -430,11 +480,11 @@ fn process_set_metadata_recoard(
     if entry.finish_record_index.is_some() {
         return Err(WpilogReadErrors::SetMetadataWithoutStart);
     }
-    entry.metadata = entry_metadata_string.to_string();
+    entry.metadata = entry_metadata.clone();
 
     return Ok(RecordData::SetMetadata(SetMetaDataRecordData {
         entry_to_be_edited: entry_id_to_set_metadata,
-        entry_new_metadata: entry_metadata_string.to_string(),
+        entry_new_metadata: entry_metadata,
     }));
 }
 fn pad_to_n_bytes<const SIZE: usize>(data: Vec<u8>) -> [u8; SIZE] {
