@@ -30,6 +30,8 @@ enum WpilogReadErrors {
     UseOfEntryIdWithoutStart,
     UseOfEntryIdAfterFinish,
     EntryIdAlreadyStarted,
+    SetMetadataWithoutStart,
+    FinishWithoutStart
 }
 #[allow(dead_code)]
 struct Record {
@@ -319,8 +321,8 @@ fn process_control_record(
 
     return match control_type {
         ControlTypes::Start => process_start_recoard(file, current_record, entry_data_lut),
-        ControlTypes::Finish => process_finish_recoard(file),
-        ControlTypes::SetMetadata => process_set_metadata_recoard(file),
+        ControlTypes::Finish => process_finish_recoard(file, current_record, entry_data_lut),
+        ControlTypes::SetMetadata => process_set_metadata_recoard(file, entry_data_lut),
     };
 }
 
@@ -379,8 +381,24 @@ fn process_start_recoard(
     }));
 }
 
-fn process_finish_recoard(file: &mut (Vec<u8>, usize)) -> Result<RecordData, WpilogReadErrors> {
+fn process_finish_recoard(file: &mut (Vec<u8>, usize),current_record: u32, entry_data_lut: &mut HashMap<u32, Vec<EntryData>>,) -> Result<RecordData, WpilogReadErrors> {
+    println!("finish rec");
     let entry_id_to_be_finished = u32::from_le_bytes(next_chunk(file, 4)?.try_into().unwrap());
+
+    let entry = match match entry_data_lut.get_mut(&entry_id_to_be_finished) {
+        None => return Err(WpilogReadErrors::SetMetadataWithoutStart),
+        Some(data) => data,
+    }
+    .last_mut()
+    {
+        None => return Err(WpilogReadErrors::SetMetadataWithoutStart),
+        Some(data) => data,
+    };
+
+    if entry.finish_record_index.is_some() {
+        return Err(WpilogReadErrors::FinishWithoutStart);
+    }
+    entry.finish_record_index = Some(current_record);
 
     return Ok(RecordData::Finish(FinishRecordData {
         entry_to_be_finished: entry_id_to_be_finished,
@@ -388,6 +406,7 @@ fn process_finish_recoard(file: &mut (Vec<u8>, usize)) -> Result<RecordData, Wpi
 }
 fn process_set_metadata_recoard(
     file: &mut (Vec<u8>, usize),
+    entry_data_lut: &mut HashMap<u32, Vec<EntryData>>,
 ) -> Result<RecordData, WpilogReadErrors> {
     let entry_id_to_set_metadata = u32::from_le_bytes(next_chunk(file, 4)?.try_into().unwrap());
 
@@ -397,6 +416,21 @@ fn process_set_metadata_recoard(
         Ok(s) => s,
         Err(_) => return Err(WpilogReadErrors::InvalidRecoard),
     };
+
+    let entry = match match entry_data_lut.get_mut(&entry_id_to_set_metadata) {
+        None => return Err(WpilogReadErrors::SetMetadataWithoutStart),
+        Some(data) => data,
+    }
+    .last_mut()
+    {
+        None => return Err(WpilogReadErrors::SetMetadataWithoutStart),
+        Some(data) => data,
+    };
+
+    if entry.finish_record_index.is_some() {
+        return Err(WpilogReadErrors::SetMetadataWithoutStart);
+    }
+    entry.metadata = entry_metadata_string.to_string();
 
     return Ok(RecordData::SetMetadata(SetMetaDataRecordData {
         entry_to_be_edited: entry_id_to_set_metadata,
