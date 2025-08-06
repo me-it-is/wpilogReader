@@ -1,13 +1,13 @@
 #![warn(clippy::all)]
-use std::{collections::HashMap, fs::File, io::Read, usize};
+use std::{collections::HashMap, fs::File, io::Read};
 
 mod control_records;
 mod headers;
 mod records;
 mod shared;
-use headers::headers::{FileHeader, read_header};
-use records::records::{Entry, Record, read_next_record};
-use shared::shared::WpilogReadErrors;
+use headers::{FileHeader, read_header};
+use records::{Entry, Record, read_next_record};
+use shared::WpilogReadErrors;
 
 static WPILOG_PATH: &str = "test.wpilog";
 #[allow(dead_code)]
@@ -44,11 +44,11 @@ fn read_wpilog(path: &str) -> Result<Wpilog<'_>, WpilogReadErrors> {
         }
     }
 
-    return Ok(Wpilog {
-        header: header,
-        records: records,
-        entry_lut: entry_lut,
-    });
+    Ok(Wpilog {
+        header,
+        records,
+        entry_lut,
+    })
 }
 
 fn main() {
