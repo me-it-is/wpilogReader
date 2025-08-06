@@ -1,5 +1,5 @@
 
-pub mod header {
+pub mod headers {
     use crate::shared::*;
     use shared::WpilogReadErrors;
     use shared::next_chunk;
