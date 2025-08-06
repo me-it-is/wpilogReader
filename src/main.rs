@@ -4,7 +4,7 @@ mod headers;
 mod shared;
 mod records;
 mod control_records;
-use headers::header::{FileHeader, read_header};
+use headers::headers::{FileHeader, read_header};
 use shared::shared::{WpilogReadErrors};
 use records::records::{Record, EntryData, read_next_record};
 
