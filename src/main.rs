@@ -16,6 +16,7 @@ struct EntryData {
     metadata: Metadata,
     finish_record_index: Option<u32>,
 }
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct Metadata {
     metadata: Option<serde_json::Value>,
@@ -29,7 +30,6 @@ enum WpilogReadErrors {
     InvalidHeader,
     InvalidRecoard,
     UnsupportedWpilogVersion,
-    UnknownDataType,
     MalformedData,
     UseOfEntryIdWithoutStart,
     UseOfEntryIdAfterFinish,
@@ -60,9 +60,14 @@ enum RecordData {
     DoubleArray(Vec<f64>),
     StringArray(Vec<String>),
     Json(Option<serde_json::Value>),
+    MessagePack(Vec<u8>),
+    Struct(Vec<u8>),
+    StructArray(Vec<u8>),
+    PhotonStruct(Vec<u8>),
+    ProtoBuff(Vec<u8>),
 }
 #[derive(Debug, Clone)]
-
+#[allow(dead_code)]
 enum DataType {
     Raw,
     Boolean,
@@ -76,6 +81,11 @@ enum DataType {
     DoubleArray,
     StringArray,
     Json,
+    MessagePack,
+    Struct(String),
+    StructArray(String),
+    PhotonStruct(String),
+    ProtoBuff(String),
 }
 
 enum ControlTypes {
@@ -279,6 +289,11 @@ fn process_data_from_standard_record(
                 Err(_) => return Err(WpilogReadErrors::MalformedData),
             },
         }),
+        DataType::MessagePack => RecordData::MessagePack(data),
+        DataType::Struct(_) => RecordData::Struct(data),
+        DataType::StructArray(_) => RecordData::StructArray(data),
+        DataType::PhotonStruct(_) => RecordData::PhotonStruct(data),
+        DataType::ProtoBuff(_) => RecordData::ProtoBuff(data),
     });
 }
 
@@ -393,10 +408,8 @@ fn process_start_recoard(
         "double[]" => DataType::DoubleArray,
         "string[]" => DataType::StringArray,
         "json" => DataType::Json,
-        str => {
-            println!("{}", str);
-            DataType::Raw
-        }
+        "msgpack" => DataType::MessagePack,
+        str => process_structs_and_stuff_type_from_string(str)?,
     };
 
     let entry_metadata_length = u32::from_le_bytes(next_chunk(file, 4)?.try_into().unwrap());
@@ -428,6 +441,32 @@ fn process_start_recoard(
         entry_type: entry_type,
         entry_metadata: entry_metadata,
     }));
+}
+
+fn process_structs_and_stuff_type_from_string(str: &str) -> Result<DataType, WpilogReadErrors> {
+    const STRUCT_STR: &str = "struct:";
+
+    if str.starts_with(STRUCT_STR) {
+        if str.ends_with("[]") {
+            let mut string = str.split_at(STRUCT_STR.len()).1.to_string();
+            string.truncate(string.len() - 2);
+            return Ok(DataType::StructArray(string));
+        }
+        return Ok(DataType::Struct(
+            str.split_at(STRUCT_STR.len()).1.to_string(),
+        ));
+    }
+    if str.starts_with("proto:") {
+        return Ok(DataType::ProtoBuff(
+            str.split_at("proto:".len()).1.to_string(),
+        ));
+    }
+    if str.starts_with("photonstruct:") {
+        return Ok(DataType::PhotonStruct(
+            str.split_at("photonstruct:".len()).1.to_string(),
+        ));
+    }
+    return Ok(DataType::Raw);
 }
 
 fn process_finish_recoard(
