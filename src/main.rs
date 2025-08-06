@@ -1,22 +1,23 @@
+#![warn(clippy::all)]
 use std::{collections::HashMap, fs::File, io::Read, usize};
 
-mod headers;
-mod shared;
-mod records;
 mod control_records;
+mod headers;
+mod records;
+mod shared;
 use headers::headers::{FileHeader, read_header};
-use shared::shared::{WpilogReadErrors};
-use records::records::{Record, EntryData, read_next_record};
+use records::records::{Entry, Record, read_next_record};
+use shared::shared::WpilogReadErrors;
 
 static WPILOG_PATH: &str = "test.wpilog";
 #[allow(dead_code)]
-struct Wpilog {
+struct Wpilog<'a> {
     header: FileHeader,
     records: Vec<Record>,
-    entry_data_lut: HashMap<u32, Vec<EntryData>>,
+    entry_lut: HashMap<u32, Entry<'a>>,
 }
 
-fn read_wpilog(path: &str) -> Result<Wpilog, WpilogReadErrors> {
+fn read_wpilog(path: &str) -> Result<Wpilog<'_>, WpilogReadErrors> {
     let mut file = match File::open(path) {
         Ok(f) => f,
         Err(_) => return Err(WpilogReadErrors::FileDoesNotExist),
@@ -27,14 +28,14 @@ fn read_wpilog(path: &str) -> Result<Wpilog, WpilogReadErrors> {
         Err(_) => return Err(WpilogReadErrors::ReadError),
     };
 
-    let mut entry_data_lut: HashMap<u32, Vec<EntryData>> = HashMap::new();
+    let mut entry_lut: HashMap<u32, Entry> = HashMap::new();
     let mut file_to_read: (Vec<u8>, usize) = (file_content, 0);
     let header = read_header(&mut file_to_read)?;
 
     let mut records: Vec<Record> = Vec::new();
 
     loop {
-        match read_next_record(&mut file_to_read, &mut entry_data_lut, records.len() as u32) {
+        match read_next_record(&mut file_to_read, &mut entry_lut, records.len() as u32) {
             Ok(r) => records.push(r),
             Err(e) => match e {
                 WpilogReadErrors::NoDataLeft => break,
@@ -46,7 +47,7 @@ fn read_wpilog(path: &str) -> Result<Wpilog, WpilogReadErrors> {
     return Ok(Wpilog {
         header: header,
         records: records,
-        entry_data_lut: entry_data_lut,
+        entry_lut: entry_lut,
     });
 }
 
