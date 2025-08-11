@@ -20,12 +20,12 @@ struct Wpilog<'a> {
 fn read_wpilog(path: &str) -> Result<Wpilog<'_>, WpilogReadErrors> {
     let mut file = match File::open(path) {
         Ok(f) => f,
-        Err(_) => return Err(WpilogReadErrors::FileDoesNotExist),
+        Err(err) => return Err(WpilogReadErrors::IoError(err)),
     };
     let mut file_content = Vec::new();
     match file.read_to_end(&mut file_content) {
         Ok(n) => _ = n,
-        Err(_) => return Err(WpilogReadErrors::ReadError),
+        Err(err) => return Err(WpilogReadErrors::IoError(err)),
     };
 
     let mut entry_lut: HashMap<u32, Entry> = HashMap::new();

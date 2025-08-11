@@ -1,11 +1,10 @@
-
 use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::control_records::{
     FinishRecordData, SetMetaDataRecordData, StartRecordData, process_control_record,
 };
-use crate::shared::{WpilogReadErrors, next_chunk, pad_to_n_bytes};
+use crate::shared::{WpilogReadErrors, next_chunk, next_chunk_vec, pad_to_n_bytes};
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct EntryMetadata {
@@ -105,7 +104,12 @@ fn get_current_entry_data<'a>(
 ) -> Result<&'a EntryMetadata, WpilogReadErrors> {
     let current_id_data = match entry_lut.get(&entry_id) {
         Some(l) => &l.meta_data,
-        None => return Err(WpilogReadErrors::UseOfEntryIdWithoutStart),
+        None => {
+            return Err(WpilogReadErrors::UseOfEntryIdWithoutStart {
+                record_num: current_record,
+                entry_id,
+            });
+        }
     };
 
     for data in current_id_data {
@@ -119,7 +123,10 @@ fn get_current_entry_data<'a>(
         }
     }
 
-    Err(WpilogReadErrors::UseOfEntryIdAfterFinish)
+    Err(WpilogReadErrors::UseOfEntryIdAfterFinish {
+        record_num: current_record,
+        entry_id,
+    })
 }
 
 pub fn read_next_record(
@@ -127,20 +134,20 @@ pub fn read_next_record(
     entry_lut: &mut HashMap<u32, Entry>,
     current_record: u32,
 ) -> Result<Record, WpilogReadErrors> {
-    let header_bit_field = next_chunk(file, 1)?[0];
+    let header_bit_field = next_chunk::<1>(file)?[0];
 
-    let entry_id = u32::from_le_bytes(pad_to_n_bytes(next_chunk(
+    let entry_id = u32::from_le_bytes(pad_to_n_bytes(next_chunk_vec(
         file,
         ((header_bit_field & 0b000011) + 1) as usize,
     )?));
 
-    let raw_payload_size = pad_to_n_bytes(next_chunk(
+    let raw_payload_size = pad_to_n_bytes(next_chunk_vec(
         file,
         (((header_bit_field & 0b00001100) >> 2) + 1) as usize,
     )?);
     let payload_size = u32::from_le_bytes(raw_payload_size);
 
-    let time_stamp_microseconds = u64::from_le_bytes(pad_to_n_bytes(next_chunk(
+    let time_stamp_microseconds = u64::from_le_bytes(pad_to_n_bytes(next_chunk_vec(
         file,
         (((header_bit_field & 0b01110000) >> 4) + 1) as usize,
     )?));
@@ -149,10 +156,12 @@ pub fn read_next_record(
     let data = if entry_id == 0 {
         process_control_record(file, current_record, entry_lut)?
     } else {
-        let raw_data = next_chunk(file, payload_size as usize)?;
+        let raw_data = next_chunk_vec(file, payload_size as usize)?;
         process_data_from_standard_record(
             &get_current_entry_data(entry_lut, current_record, entry_id)?.data_type,
             raw_data,
+            current_record,
+            entry_id,
         )?
     };
 
@@ -163,49 +172,89 @@ pub fn read_next_record(
     })
 }
 
-fn process_boolean(byte: [u8; 1]) -> Result<bool, WpilogReadErrors> {
+fn process_boolean(
+    byte: [u8; 1],
+    current_record: u32,
+    entry_id: u32,
+) -> Result<bool, WpilogReadErrors> {
     match byte[0] {
         0 => Ok(false),
         1 => Ok(true),
-        _ => Err(WpilogReadErrors::MalformedData),
+        _ => Err(WpilogReadErrors::MalformedData {
+            record_num: current_record,
+            entry_id,
+        }),
     }
 }
 
 fn process_data_from_standard_record(
     data_type: &DataType,
     data: Vec<u8>,
+    current_record: u32,
+    entry_id: u32,
 ) -> Result<RecordData, WpilogReadErrors> {
     let data_type = match data_type {
         DataType::Raw => RecordData::Raw(data),
-        DataType::Boolean => RecordData::Boolean(process_boolean(data.try_into().unwrap())?),
+        DataType::Boolean => RecordData::Boolean(process_boolean(
+            data.try_into().unwrap(),
+            current_record,
+            entry_id,
+        )?),
         DataType::Integer => RecordData::Integer(i64::from_le_bytes(data.try_into().unwrap())),
         DataType::Float => RecordData::Float(f32::from_le_bytes(data.try_into().unwrap())),
         DataType::Double => RecordData::Double(f64::from_le_bytes(data.try_into().unwrap())),
         DataType::String => RecordData::String(match String::from_utf8(data) {
             Ok(s) => s,
-            Err(_) => return Err(WpilogReadErrors::MalformedData),
+            Err(_) => {
+                return Err(WpilogReadErrors::MalformedData {
+                    record_num: current_record,
+                    entry_id,
+                });
+            }
         }),
-        DataType::BooleanArray => {
-            RecordData::BooleanArray(process_array_data(data, &(process_boolean))?)
-        }
-        DataType::IntegerArray => {
-            RecordData::IntegerArray(process_array_data_no_err(data, &i64::from_le_bytes)?)
-        }
-        DataType::FloatArray => {
-            RecordData::FloatArray(process_array_data_no_err(data, &f32::from_le_bytes)?)
-        }
-        DataType::DoubleArray => {
-            RecordData::DoubleArray(process_array_data_no_err(data, &f64::from_le_bytes)?)
-        }
-        DataType::StringArray => match process_string_array(data) {
+        DataType::BooleanArray => RecordData::BooleanArray(process_array_data(
+            data,
+            &|byte: [u8; 1]| process_boolean(byte, current_record, entry_id),
+            current_record,
+            entry_id,
+        )?),
+        DataType::IntegerArray => RecordData::IntegerArray(process_array_data_no_err(
+            data,
+            &i64::from_le_bytes,
+            current_record,
+            entry_id,
+        )?),
+        DataType::FloatArray => RecordData::FloatArray(process_array_data_no_err(
+            data,
+            &f32::from_le_bytes,
+            current_record,
+            entry_id,
+        )?),
+        DataType::DoubleArray => RecordData::DoubleArray(process_array_data_no_err(
+            data,
+            &f64::from_le_bytes,
+            current_record,
+            entry_id,
+        )?),
+        DataType::StringArray => match process_string_array(data, current_record, entry_id) {
             Ok(sa) => sa,
-            Err(_) => return Err(WpilogReadErrors::MalformedData),
+            Err(_) => {
+                return Err(WpilogReadErrors::MalformedData {
+                    record_num: current_record,
+                    entry_id,
+                });
+            }
         },
         DataType::Json => RecordData::Json(match data.len() {
             0 => None,
             _ => match serde_json::from_slice(&data) {
                 Ok(j) => j,
-                Err(_) => return Err(WpilogReadErrors::MalformedData),
+                Err(_) => {
+                    return Err(WpilogReadErrors::MalformedData {
+                        record_num: current_record,
+                        entry_id,
+                    });
+                }
             },
         }),
         DataType::MessagePack => RecordData::MessagePack(data),
@@ -220,13 +269,22 @@ fn process_data_from_standard_record(
 fn process_array_data_no_err<T, const DATA_SIZE: usize>(
     data: Vec<u8>,
     from_func: &dyn Fn([u8; DATA_SIZE]) -> T,
+    current_record: u32,
+    entry_id: u32,
 ) -> Result<Vec<T>, WpilogReadErrors> {
-    process_array_data(data, &|data: [u8; DATA_SIZE]| Ok(from_func(data)))
+    process_array_data(
+        data,
+        &|data: [u8; DATA_SIZE]| Ok(from_func(data)),
+        current_record,
+        entry_id,
+    )
 }
 
 fn process_array_data<T, const DATA_SIZE: usize>(
     data: Vec<u8>,
     from_func: &dyn Fn([u8; DATA_SIZE]) -> Result<T, WpilogReadErrors>,
+    current_record: u32,
+    entry_id: u32,
 ) -> Result<Vec<T>, WpilogReadErrors> {
     let mut out = Vec::new();
     let mut entries = data.chunks_exact(DATA_SIZE);
@@ -235,22 +293,34 @@ fn process_array_data<T, const DATA_SIZE: usize>(
         out.push(from_func(e.try_into().unwrap())?);
     }
     if !entries.remainder().is_empty() {
-        return Err(WpilogReadErrors::MalformedData);
+        return Err(WpilogReadErrors::MalformedData {
+            record_num: current_record,
+            entry_id,
+        });
     }
     Ok(out)
 }
 
-fn process_string_array(data: Vec<u8>) -> Result<RecordData, WpilogReadErrors> {
+fn process_string_array(
+    data: Vec<u8>,
+    current_record: u32,
+    entry_id: u32,
+) -> Result<RecordData, WpilogReadErrors> {
     let mut indexer = (data, 0);
-    let length = u32::from_le_bytes(next_chunk(&mut indexer, 4)?.try_into().unwrap());
+    let length = u32::from_le_bytes(next_chunk(&mut indexer)?);
     let mut out = Vec::new();
 
     for _i in 0..length {
-        let string_length = u32::from_le_bytes(next_chunk(&mut indexer, 4)?.try_into().unwrap());
+        let string_length = u32::from_le_bytes(next_chunk(&mut indexer)?);
         out.push(
-            match String::from_utf8(next_chunk(&mut indexer, string_length as usize)?) {
+            match String::from_utf8(next_chunk_vec(&mut indexer, string_length as usize)?) {
                 Ok(s) => s,
-                Err(_) => return Err(WpilogReadErrors::MalformedData),
+                Err(_) => {
+                    return Err(WpilogReadErrors::MalformedData {
+                        record_num: current_record,
+                        entry_id,
+                    });
+                }
             },
         );
     }
@@ -258,13 +328,22 @@ fn process_string_array(data: Vec<u8>) -> Result<RecordData, WpilogReadErrors> {
     Ok(RecordData::StringArray(out))
 }
 
-pub fn process_metadata(data: Vec<u8>) -> Result<Metadata, WpilogReadErrors> {
+pub fn process_metadata(
+    data: Vec<u8>,
+    current_record: u32,
+    entry_id: u32,
+) -> Result<Metadata, WpilogReadErrors> {
     let metadata = if data.is_empty() {
         None
     } else {
         Some(match serde_json::from_slice(&data) {
             Ok(j) => j,
-            Err(_) => return Err(WpilogReadErrors::MalformedData),
+            Err(_) => {
+                return Err(WpilogReadErrors::MalformedData {
+                    record_num: current_record,
+                    entry_id,
+                });
+            }
         })
     };
     Ok(Metadata { metadata })

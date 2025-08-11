@@ -1,5 +1,4 @@
-
-use crate::shared::{WpilogReadErrors, next_chunk};
+use crate::shared::{WpilogReadErrors, next_chunk, next_chunk_vec};
 
 #[allow(dead_code)]
 pub struct FileHeader {
@@ -8,23 +7,25 @@ pub struct FileHeader {
 }
 
 pub fn read_header(file: &mut (Vec<u8>, usize)) -> Result<FileHeader, WpilogReadErrors> {
-    if (match str::from_utf8(next_chunk(file, 6)?.as_slice()) {
+    if (match str::from_utf8(next_chunk_vec(file, 6)?.as_slice()) {
         Ok(s) => s,
         Err(_) => return Err(WpilogReadErrors::InvalidHeader),
     } != "WPILOG")
     {
         return Err(WpilogReadErrors::InvalidHeader);
     }
-    let raw_version_number = next_chunk(file, 2)?.try_into().unwrap();
+    let raw_version_number = next_chunk(file)?;
     let version_number = u16::from_le_bytes(raw_version_number);
 
     if version_number != 0x0100 {
-        return Err(WpilogReadErrors::UnsupportedWpilogVersion);
+        return Err(WpilogReadErrors::UnsupportedWpilogVersion {
+            version: version_number,
+        });
     }
 
-    let extra_string_length = u32::from_le_bytes(next_chunk(file, 4)?.try_into().unwrap());
+    let extra_string_length = u32::from_le_bytes(next_chunk(file)?);
 
-    let extra_string_raw = next_chunk(file, extra_string_length as usize)?;
+    let extra_string_raw = next_chunk_vec(file, extra_string_length as usize)?;
     let extra_string = match str::from_utf8(extra_string_raw.as_slice()) {
         Ok(s) => s,
         Err(_) => return Err(WpilogReadErrors::InvalidHeader),
