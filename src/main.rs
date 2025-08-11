@@ -9,7 +9,6 @@ use headers::{FileHeader, read_header};
 use records::{Entry, Record, read_next_record};
 use shared::WpilogReadErrors;
 
-static WPILOG_PATH: &str = "test.wpilog";
 #[allow(dead_code)]
 struct Wpilog<'a> {
     header: FileHeader,
@@ -52,5 +51,8 @@ fn read_wpilog(path: &str) -> Result<Wpilog<'_>, WpilogReadErrors> {
 }
 
 fn main() {
-    read_wpilog(WPILOG_PATH).unwrap();
+    let mut wpilog_path = dirs::home_dir().unwrap();
+    wpilog_path.push("Documents/code/robotics/wpilogReader/test.wpilog");
+
+    read_wpilog(wpilog_path.as_path().to_str().unwrap()).unwrap();
 }
