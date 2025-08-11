@@ -1,4 +1,3 @@
-
 use crate::records::{DataType, Entry, EntryMetadata, Metadata, RecordData, process_metadata};
 use crate::shared::{WpilogReadErrors, next_chunk};
 use std::collections::HashMap;
