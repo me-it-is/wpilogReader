@@ -57,6 +57,7 @@ pub fn next_chunk_vec(
     size: usize,
 ) -> Result<Vec<u8>, WpilogReadErrors> {
     let mut out: Vec<u8> = Vec::new();
+    out.reserve_exact(size);
     let mut iter = file.0.iter().skip(file.1);
     for _i in 0..size {
         out.push(
