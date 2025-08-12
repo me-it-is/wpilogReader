@@ -1,5 +1,9 @@
 #![warn(clippy::all)]
-use std::{collections::HashMap, fs::File, io::Read};
+use std::{
+    collections::HashMap,
+    fs::{File, read_dir},
+    io::Read,
+};
 
 mod control_records;
 mod headers;
@@ -52,7 +56,9 @@ fn read_wpilog(path: &str) -> Result<Wpilog<'_>, WpilogReadErrors> {
 
 fn main() {
     let mut wpilog_path = dirs::home_dir().unwrap();
-    wpilog_path.push("Documents/code/robotics/wpilogReader/test.wpilog");
-
-    read_wpilog(wpilog_path.as_path().to_str().unwrap()).unwrap();
+    wpilog_path.push("Documents/code/robotics/wpilogReader/tests");
+    let paths = read_dir(wpilog_path).unwrap();
+    for path in paths {
+        read_wpilog(path.unwrap().path().to_str().unwrap()).unwrap();
+    }
 }
