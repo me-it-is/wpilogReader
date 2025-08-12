@@ -32,12 +32,13 @@ impl EntryMetadata {
     }
 }
 #[allow(dead_code)]
-pub struct Entry<'a> {
+#[derive(Debug)]
+pub struct Entry {
     pub meta_data: Vec<EntryMetadata>,
-    pub records: Vec<&'a Record>,
+    pub records: Vec<Record>,
 }
-impl Entry<'_> {
-    pub fn new<'a>(meta_data: Vec<EntryMetadata>, records: Vec<&'a Record>) -> Entry<'a> {
+impl Entry {
+    pub fn new(meta_data: Vec<EntryMetadata>, records: Vec<Record>) -> Entry {
         Entry { meta_data, records }
     }
 }
@@ -48,12 +49,14 @@ pub struct Metadata {
 }
 
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct Record {
     entry_id: u32,
     time_stamp: Duration,
     data: RecordData,
 }
 #[allow(dead_code)]
+#[derive(Debug)]
 pub enum RecordData {
     Start(StartRecordData),
     Finish(FinishRecordData),
@@ -133,7 +136,7 @@ pub fn read_next_record(
     file: &mut (Vec<u8>, usize),
     entry_lut: &mut HashMap<u32, Entry>,
     current_record: u32,
-) -> Result<Record, WpilogReadErrors> {
+) -> Result<(), WpilogReadErrors> {
     let header_bit_field = next_chunk::<1>(file)?[0];
 
     let entry_id = u32::from_le_bytes(pad_to_n_bytes(next_chunk_vec(
@@ -165,11 +168,25 @@ pub fn read_next_record(
         )?
     };
 
-    Ok(Record {
+    let record = Record {
         entry_id: entry_id as u32,
         time_stamp,
         data,
-    })
+    };
+
+    if entry_id != 0 {
+        match entry_lut.get_mut(&entry_id) {
+            Some(r) => r.records.push(record),
+            None => {
+                return Err(WpilogReadErrors::UseOfEntryIdWithoutStart {
+                    record_num: current_record,
+                    entry_id,
+                });
+            }
+        };
+    }
+
+    Ok(())
 }
 
 fn process_boolean(

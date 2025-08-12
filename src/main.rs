@@ -10,17 +10,16 @@ mod headers;
 mod records;
 mod shared;
 use headers::{FileHeader, read_header};
-use records::{Entry, Record, read_next_record};
+use records::{Entry, read_next_record};
 use shared::WpilogReadErrors;
 
 #[allow(dead_code)]
-struct Wpilog<'a> {
+struct Wpilog {
     header: FileHeader,
-    records: Vec<Record>,
-    entry_lut: HashMap<u32, Entry<'a>>,
+    entry_lut: HashMap<u32, Entry>,
 }
 
-fn read_wpilog<'a>(path: &'a str) -> Result<Wpilog<'_>, WpilogReadErrors> {
+fn read_wpilog(path: &str) -> Result<Wpilog, WpilogReadErrors> {
     let mut file = match File::open(path) {
         Ok(f) => f,
         Err(err) => return Err(WpilogReadErrors::IoError(err)),
@@ -35,25 +34,17 @@ fn read_wpilog<'a>(path: &'a str) -> Result<Wpilog<'_>, WpilogReadErrors> {
     let mut file_to_read: (Vec<u8>, usize) = (file_content, 0);
     let header = read_header(&mut file_to_read)?;
 
-    let mut records: Vec<&'a Record> = Vec::new();
-
+    let mut record_num = 0;
     loop {
-        let record = match read_next_record(&mut file_to_read, &mut entry_lut, records.len() as u32)
-        {
+        match read_next_record(&mut file_to_read, &mut entry_lut, record_num as u32) {
             Ok(r) => r,
-            Err(e) => match e {
-                WpilogReadErrors::NoDataLeft => break,
-                _ => return Err(e),
-            },
+            Err(WpilogReadErrors::NoDataLeft) => break,
+            Err(e) => return Err(e),
         };
-        records.push(&record);
+        record_num += 1;
     }
 
-    Ok(Wpilog {
-        header,
-        records,
-        entry_lut,
-    })
+    Ok(Wpilog { header, entry_lut })
 }
 
 fn main() {

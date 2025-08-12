@@ -7,6 +7,7 @@ pub enum ControlTypes {
     SetMetadata,
 }
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct StartRecordData {
     entry_id_to_be_started: u32,
     entry_name: String,
@@ -14,10 +15,12 @@ pub struct StartRecordData {
     entry_metadata: Metadata,
 }
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct FinishRecordData {
     entry_to_be_finished: u32,
 }
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct SetMetaDataRecordData {
     entry_to_be_edited: u32,
     entry_new_metadata: Metadata,
