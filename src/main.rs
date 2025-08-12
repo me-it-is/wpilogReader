@@ -59,6 +59,10 @@ fn main() {
     wpilog_path.push("Documents/code/robotics/wpilogReader/tests");
     let paths = read_dir(wpilog_path).unwrap();
     for path in paths {
-        read_wpilog(path.unwrap().path().to_str().unwrap()).unwrap();
+        let raw_path_str = path.unwrap().path();
+        let path_str = raw_path_str.to_str().unwrap();
+        if path_str.ends_with(".wpilog") {
+            read_wpilog(path_str).unwrap();
+        }
     }
 }
