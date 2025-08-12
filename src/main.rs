@@ -16,7 +16,7 @@ use shared::WpilogReadErrors;
 #[allow(dead_code)]
 struct Wpilog<'a> {
     header: FileHeader,
-    records: Vec<&'a Record>,
+    records: Vec<Record>,
     entry_lut: HashMap<u32, Entry<'a>>,
 }
 
