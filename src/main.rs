@@ -16,11 +16,11 @@ use shared::WpilogReadErrors;
 #[allow(dead_code)]
 struct Wpilog<'a> {
     header: FileHeader,
-    records: Vec<Record>,
+    records: Vec<&'a Record>,
     entry_lut: HashMap<u32, Entry<'a>>,
 }
 
-fn read_wpilog(path: &str) -> Result<Wpilog<'_>, WpilogReadErrors> {
+fn read_wpilog<'a>(path: &'a str) -> Result<Wpilog<'_>, WpilogReadErrors> {
     let mut file = match File::open(path) {
         Ok(f) => f,
         Err(err) => return Err(WpilogReadErrors::IoError(err)),
@@ -35,16 +35,18 @@ fn read_wpilog(path: &str) -> Result<Wpilog<'_>, WpilogReadErrors> {
     let mut file_to_read: (Vec<u8>, usize) = (file_content, 0);
     let header = read_header(&mut file_to_read)?;
 
-    let mut records: Vec<Record> = Vec::new();
+    let mut records: Vec<&'a Record> = Vec::new();
 
     loop {
-        match read_next_record(&mut file_to_read, &mut entry_lut, records.len() as u32) {
-            Ok(r) => records.push(r),
+        let record = match read_next_record(&mut file_to_read, &mut entry_lut, records.len() as u32)
+        {
+            Ok(r) => r,
             Err(e) => match e {
                 WpilogReadErrors::NoDataLeft => break,
                 _ => return Err(e),
             },
-        }
+        };
+        records.push(&record);
     }
 
     Ok(Wpilog {
