@@ -25,6 +25,8 @@ pub enum WpilogReadErrors {
     SetMetadataWithoutStart { record_num: u32, entry_id: u32 },
     #[error("record {record_num} tried to finish entry {entry_id} before a start entry")]
     FinishWithoutStart { record_num: u32, entry_id: u32 },
+    #[error("cant decode a record")]
+    CantEncodeRecord,
 }
 pub fn pad_to_n_bytes<const SIZE: usize>(data: Vec<u8>) -> [u8; SIZE] {
     let mut arr: [u8; SIZE] = [0; SIZE];

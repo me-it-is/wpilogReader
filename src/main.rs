@@ -6,6 +6,7 @@ use std::{
 };
 
 mod control_records;
+mod encode_records;
 mod headers;
 mod records;
 mod shared;

@@ -82,22 +82,7 @@ fn process_start_recoard(
         }
     };
 
-    let entry_type = match entry_type_string {
-        "raw" => DataType::Raw,
-        "boolean" => DataType::Boolean,
-        "int64" => DataType::Integer,
-        "float" => DataType::Float,
-        "double" => DataType::Double,
-        "string" => DataType::String,
-        "boolean[]" => DataType::BooleanArray,
-        "int64[]" => DataType::IntegerArray,
-        "float[]" => DataType::FloatArray,
-        "double[]" => DataType::DoubleArray,
-        "string[]" => DataType::StringArray,
-        "json" => DataType::Json,
-        "msgpack" => DataType::MessagePack,
-        str => process_structs_and_stuff_type_from_string(str)?,
-    };
+    let entry_type = DataType::from_str(entry_type_string)?;
 
     let entry_metadata_length = u32::from_le_bytes(next_chunk(file)?);
     let entry_metadata_raw = next_chunk_vec(file, entry_metadata_length as usize)?;
@@ -136,33 +121,6 @@ fn process_start_recoard(
     });
 
     Ok(record_data)
-}
-
-fn process_structs_and_stuff_type_from_string(str: &str) -> Result<DataType, WpilogReadErrors> {
-    const STRUCT_STR: &str = "struct:";
-
-    if str.starts_with(STRUCT_STR) {
-        if str.ends_with("[]") {
-            let mut string = str.split_at(STRUCT_STR.len()).1.to_string();
-            string.truncate(string.len() - 2);
-            return Ok(DataType::StructArray(string));
-        }
-        return Ok(DataType::Struct(
-            str.split_at(STRUCT_STR.len()).1.to_string(),
-        ));
-    }
-    if str.starts_with("proto:") {
-        return Ok(DataType::ProtoBuff(
-            str.split_at("proto:".len()).1.to_string(),
-        ));
-    }
-    if str.starts_with("photonstruct:") {
-        return Ok(DataType::PhotonStruct(
-            str.split_at("photonstruct:".len()).1.to_string(),
-        ));
-    }
-
-    Ok(DataType::Raw)
 }
 
 fn process_finish_recoard(

@@ -51,9 +51,9 @@ pub struct Metadata {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct Record {
-    entry_id: u32,
-    time_stamp: Duration,
-    data: RecordData,
+    pub entry_id: u32,
+    pub time_stamp: Duration,
+    pub data: RecordData,
 }
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -78,7 +78,46 @@ pub enum RecordData {
     StructArray(Vec<u8>),
     PhotonStruct(Vec<u8>),
     ProtoBuff(Vec<u8>),
+    Other(Vec<u8>),
 }
+impl RecordData {
+    pub fn get_size(&self) -> Result<usize, WpilogReadErrors> {
+        let size = match self {
+            RecordData::Start(_) => size_of::<StartRecordData>(),
+            RecordData::Finish(_) => size_of::<FinishRecordData>(),
+            RecordData::SetMetadata(_) => size_of::<SetMetaDataRecordData>(),
+            RecordData::Raw(d) => d.len(),
+            RecordData::Boolean(_) => size_of::<bool>(),
+            RecordData::Integer(_) => size_of::<i64>(),
+            RecordData::Float(_) => size_of::<f32>(),
+            RecordData::Double(_) => size_of::<f64>(),
+            RecordData::String(s) => s.len(),
+            RecordData::BooleanArray(a) => size_of::<bool>() * a.len(),
+            RecordData::IntegerArray(a) => size_of::<i64>() * a.len(),
+            RecordData::FloatArray(a) => size_of::<f32>() * a.len(),
+            RecordData::DoubleArray(a) => size_of::<f64>() * a.len(),
+            RecordData::StringArray(a) => a.iter().map(|s| s.len()).sum::<usize>(),
+            RecordData::Json(v) => match v {
+                None => 0,
+                Some(data) => match serde_json::to_string(data) {
+                    Err(_) => return Err(WpilogReadErrors::CantEncodeRecord),
+                    Ok(s) => s,
+                }
+                .len(),
+            },
+            RecordData::MessagePack(a) => a.len(),
+            RecordData::Struct(a) => a.len(),
+            RecordData::StructArray(a) => a.len(),
+            RecordData::PhotonStruct(a) => a.len(),
+            RecordData::ProtoBuff(a) => a.len(),
+            RecordData::Other(a) => a.len(),
+        };
+        Ok(size)
+    }
+}
+const STRUCT_STR: &str = "struct:";
+const PROTOBUFF_STR: &str = "proto:";
+const PHOTONSTRUCT_STR: &str = "photonstruct:";
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum DataType {
@@ -99,12 +138,81 @@ pub enum DataType {
     StructArray(String),
     PhotonStruct(String),
     ProtoBuff(String),
+    Other(String),
 }
-fn get_current_entry_data<'a>(
-    entry_lut: &'a HashMap<u32, Entry>,
+impl DataType {
+    pub fn from_str(str: &str) -> Result<DataType, WpilogReadErrors> {
+        let data_type = match str {
+            "raw" => DataType::Raw,
+            "boolean" => DataType::Boolean,
+            "int64" => DataType::Integer,
+            "float" => DataType::Float,
+            "double" => DataType::Double,
+            "string" => DataType::String,
+            "boolean[]" => DataType::BooleanArray,
+            "int64[]" => DataType::IntegerArray,
+            "float[]" => DataType::FloatArray,
+            "double[]" => DataType::DoubleArray,
+            "string[]" => DataType::StringArray,
+            "json" => DataType::Json,
+            "msgpack" => DataType::MessagePack,
+            _ => process_structs_and_stuff_type_from_string(str)?,
+        };
+        Ok(data_type)
+    }
+    pub fn to_str(&self) -> String {
+        match self {
+            DataType::Raw => "raw".to_string(),
+            DataType::Boolean => "boolean".to_string(),
+            DataType::Integer => "int64".to_string(),
+            DataType::Float => "float".to_string(),
+            DataType::Double => "double".to_string(),
+            DataType::String => "string".to_string(),
+            DataType::BooleanArray => "boolean[]".to_string(),
+            DataType::IntegerArray => "int64[]".to_string(),
+            DataType::FloatArray => "float[]".to_string(),
+            DataType::DoubleArray => "double[]".to_string(),
+            DataType::StringArray => "string[]".to_string(),
+            DataType::Json => "json".to_string(),
+            DataType::MessagePack => "msgpack".to_string(),
+            DataType::Struct(s) => STRUCT_STR.to_owned() + s,
+            DataType::StructArray(s) => STRUCT_STR.to_owned() + s + "[]",
+            DataType::ProtoBuff(s) => PROTOBUFF_STR.to_owned() + s,
+            DataType::PhotonStruct(s) => PHOTONSTRUCT_STR.to_owned() + s,
+            DataType::Other(s) => s.to_string(),
+        }
+    }
+}
+fn process_structs_and_stuff_type_from_string(str: &str) -> Result<DataType, WpilogReadErrors> {
+    if str.starts_with(STRUCT_STR) {
+        if str.ends_with("[]") {
+            let mut string = str.split_at(STRUCT_STR.len()).1.to_string();
+            string.truncate(string.len() - 2);
+            return Ok(DataType::StructArray(string));
+        }
+        return Ok(DataType::Struct(
+            str.split_at(STRUCT_STR.len()).1.to_string(),
+        ));
+    }
+    if str.starts_with(PROTOBUFF_STR) {
+        return Ok(DataType::ProtoBuff(
+            str.split_at(PROTOBUFF_STR.len()).1.to_string(),
+        ));
+    }
+    if str.starts_with(PHOTONSTRUCT_STR) {
+        return Ok(DataType::PhotonStruct(
+            str.split_at(PHOTONSTRUCT_STR.len()).1.to_string(),
+        ));
+    }
+
+    Ok(DataType::Other(str.to_owned()))
+}
+
+fn get_current_entry_data(
+    entry_lut: &HashMap<u32, Entry>,
     current_record: u32,
     entry_id: u32,
-) -> Result<&'a EntryMetadata, WpilogReadErrors> {
+) -> Result<&EntryMetadata, WpilogReadErrors> {
     let current_id_data = match entry_lut.get(&entry_id) {
         Some(l) => &l.meta_data,
         None => {
@@ -279,6 +387,7 @@ fn process_data_from_standard_record(
         DataType::StructArray(_) => RecordData::StructArray(data),
         DataType::PhotonStruct(_) => RecordData::PhotonStruct(data),
         DataType::ProtoBuff(_) => RecordData::ProtoBuff(data),
+        DataType::Other(_) => RecordData::Other(data),
     };
     Ok(data_type)
 }
