@@ -14,10 +14,28 @@ pub struct StartRecordData {
     entry_type: DataType,
     entry_metadata: Metadata,
 }
+impl StartRecordData {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, WpilogReadErrors> {
+        let mut out = vec![];
+        out.push(0);
+        out.extend_from_slice(self.entry_id_to_be_started.to_le_bytes().as_slice());
+        out.extend_from_slice((self.entry_name.len() as u32).to_le_bytes().as_slice());
+        out.extend_from_slice(self.entry_name.as_bytes());
+        out.extend_from_slice(self.entry_metadata.to_bytes()?.as_slice());
+        Ok(out)
+    }
+}
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct FinishRecordData {
     entry_to_be_finished: u32,
+}
+impl FinishRecordData {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = vec![1];
+        out.extend_from_slice(self.entry_to_be_finished.to_le_bytes().as_slice());
+        out
+    }
 }
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -25,6 +43,15 @@ pub struct SetMetaDataRecordData {
     entry_to_be_edited: u32,
     entry_new_metadata: Metadata,
 }
+impl SetMetaDataRecordData {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, WpilogReadErrors> {
+        let mut out = vec![2];
+        out.extend_from_slice(self.entry_to_be_edited.to_le_bytes().as_slice());
+        out.extend_from_slice(self.entry_new_metadata.to_bytes()?.as_slice());
+        Ok(out)
+    }
+}
+
 pub fn process_control_record(
     file: &mut (Vec<u8>, usize),
     current_record: u32,

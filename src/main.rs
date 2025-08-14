@@ -10,6 +10,7 @@ mod encode_records;
 mod headers;
 mod records;
 mod shared;
+use encode_records::record_to_bytes;
 use headers::{FileHeader, read_header};
 use records::{Entry, read_next_record};
 use shared::WpilogReadErrors;
@@ -56,7 +57,14 @@ fn main() {
         let raw_path_str = path.unwrap().path();
         let path_str = raw_path_str.to_str().unwrap();
         if path_str.ends_with(".wpilog") {
-            read_wpilog(path_str).unwrap();
+            let wpilog = read_wpilog(path_str).unwrap();
+            println!("{}", path_str);
+            for (_, entry) in wpilog.entry_lut {
+                //println!("metadata:{:?}", entry.meta_data);
+                for record in entry.records {
+                    _ = record_to_bytes(&record);
+                }
+            }
         }
     }
 }

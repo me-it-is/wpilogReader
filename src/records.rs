@@ -4,7 +4,7 @@ use std::time::Duration;
 use crate::control_records::{
     FinishRecordData, SetMetaDataRecordData, StartRecordData, process_control_record,
 };
-use crate::shared::{WpilogReadErrors, next_chunk, next_chunk_vec, pad_to_n_bytes};
+use crate::shared::{WpilogReadErrors, bool_to_byte, next_chunk, next_chunk_vec, pad_to_n_bytes};
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct EntryMetadata {
@@ -45,14 +45,31 @@ impl Entry {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Metadata {
-    metadata: Option<serde_json::Value>,
+    pub metadata: Option<serde_json::Value>,
+}
+
+impl Metadata {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, WpilogReadErrors> {
+        let mut out = vec![];
+        let metadata_string = match &self.metadata {
+            None => "".to_string(),
+            Some(d) => match serde_json::from_value(d.clone()) {
+                Err(_) => return Err(WpilogReadErrors::CantEncodeRecord),
+                Ok(s) => s,
+            },
+        };
+        out.extend_from_slice((metadata_string.len() as u32).to_le_bytes().as_slice());
+        out.extend_from_slice(metadata_string.as_bytes());
+
+        Ok(out)
+    }
 }
 
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct Record {
     pub entry_id: u32,
-    pub time_stamp: Duration,
+    pub timestamp: Duration,
     pub data: RecordData,
 }
 #[allow(dead_code)]
@@ -81,40 +98,65 @@ pub enum RecordData {
     Other(Vec<u8>),
 }
 impl RecordData {
-    pub fn get_size(&self) -> Result<usize, WpilogReadErrors> {
-        let size = match self {
-            RecordData::Start(_) => size_of::<StartRecordData>(),
-            RecordData::Finish(_) => size_of::<FinishRecordData>(),
-            RecordData::SetMetadata(_) => size_of::<SetMetaDataRecordData>(),
-            RecordData::Raw(d) => d.len(),
-            RecordData::Boolean(_) => size_of::<bool>(),
-            RecordData::Integer(_) => size_of::<i64>(),
-            RecordData::Float(_) => size_of::<f32>(),
-            RecordData::Double(_) => size_of::<f64>(),
-            RecordData::String(s) => s.len(),
-            RecordData::BooleanArray(a) => size_of::<bool>() * a.len(),
-            RecordData::IntegerArray(a) => size_of::<i64>() * a.len(),
-            RecordData::FloatArray(a) => size_of::<f32>() * a.len(),
-            RecordData::DoubleArray(a) => size_of::<f64>() * a.len(),
-            RecordData::StringArray(a) => a.iter().map(|s| s.len()).sum::<usize>(),
-            RecordData::Json(v) => match v {
-                None => 0,
-                Some(data) => match serde_json::to_string(data) {
-                    Err(_) => return Err(WpilogReadErrors::CantEncodeRecord),
-                    Ok(s) => s,
-                }
-                .len(),
+    pub fn to_bytes(&self) -> Result<Vec<u8>, WpilogReadErrors> {
+        let bytes = match self {
+            RecordData::Start(d) => d.to_bytes()?,
+            RecordData::Finish(d) => d.to_bytes(),
+            RecordData::SetMetadata(d) => d.to_bytes()?,
+            RecordData::Raw(d) => d.clone(),
+            RecordData::Boolean(d) => vec![bool_to_byte(d)],
+            RecordData::Integer(d) => d.to_le_bytes().to_vec(),
+            RecordData::Float(d) => d.to_le_bytes().to_vec(),
+            RecordData::Double(d) => d.to_le_bytes().to_vec(),
+            RecordData::String(d) => {
+                let mut out = (d.len()).to_le_bytes().to_vec();
+                out.append(&mut d.as_bytes().to_vec());
+                out
+            }
+            RecordData::BooleanArray(d) => {
+                convert_array_to_bytes(d, &|boolean: bool| [bool_to_byte(&boolean)])
+            }
+            RecordData::IntegerArray(d) => convert_array_to_bytes(d, &i64::to_le_bytes),
+            RecordData::FloatArray(d) => convert_array_to_bytes(d, &f32::to_le_bytes),
+            RecordData::DoubleArray(d) => convert_array_to_bytes(d, &f64::to_le_bytes),
+            RecordData::StringArray(d) => convert_string_array_to_bytes(d),
+            RecordData::Json(d) => match serde_json::to_string(&d) {
+                Err(_) => return Err(WpilogReadErrors::CantEncodeRecord),
+                Ok(s) => s.as_bytes().to_vec(),
             },
-            RecordData::MessagePack(a) => a.len(),
-            RecordData::Struct(a) => a.len(),
-            RecordData::StructArray(a) => a.len(),
-            RecordData::PhotonStruct(a) => a.len(),
-            RecordData::ProtoBuff(a) => a.len(),
-            RecordData::Other(a) => a.len(),
+            RecordData::MessagePack(d) => d.clone(),
+            RecordData::Struct(d) => d.clone(),
+            RecordData::StructArray(d) => d.clone(),
+            RecordData::PhotonStruct(d) => d.clone(),
+            RecordData::ProtoBuff(d) => d.clone(),
+            RecordData::Other(d) => d.clone(),
         };
-        Ok(size)
+
+        Ok(bytes)
     }
 }
+fn convert_array_to_bytes<T: Clone, const DATA_SIZE: usize>(
+    array: &Vec<T>,
+    from_func: &dyn Fn(T) -> [u8; DATA_SIZE],
+) -> Vec<u8> {
+    let mut out = vec![];
+    for entry in array {
+        out.extend_from_slice(from_func(entry.clone()).as_slice());
+    }
+    out
+}
+
+fn convert_string_array_to_bytes(array: &Vec<String>) -> Vec<u8> {
+    let mut out = vec![];
+
+    for str in array {
+        out.extend_from_slice((str.len() as u32).to_le_bytes().as_slice());
+        out.extend_from_slice(str.as_bytes());
+    }
+
+    out
+}
+
 const STRUCT_STR: &str = "struct:";
 const PROTOBUFF_STR: &str = "proto:";
 const PHOTONSTRUCT_STR: &str = "photonstruct:";
@@ -278,7 +320,7 @@ pub fn read_next_record(
 
     let record = Record {
         entry_id: entry_id as u32,
-        time_stamp,
+        timestamp: time_stamp,
         data,
     };
 

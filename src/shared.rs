@@ -73,3 +73,9 @@ pub fn next_chunk_vec(
 
     Ok(out)
 }
+pub fn bool_to_byte(bool: &bool) -> u8 {
+    match bool {
+        true => 1,
+        false => 0,
+    }
+}

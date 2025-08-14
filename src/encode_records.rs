@@ -1,11 +1,10 @@
-use crate::{
-    records::{DataType, Entry, EntryMetadata, Metadata, Record, RecordData},
-    shared::WpilogReadErrors,
-};
+use crate::{records::Record, shared::WpilogReadErrors};
 
-pub fn record_to_bytes(record: Record) -> Result<Vec<u8>, WpilogReadErrors> {
+pub fn record_to_bytes(record: &Record) -> Result<Vec<u8>, WpilogReadErrors> {
     let mut out: Vec<u8> = vec![];
-    let bit_field_lengths = get_header_bit_field_lengths(&record)?;
+    let mut payload = record.data.to_bytes()?;
+    let payload_size = payload.len() as u32;
+    let bit_field_lengths = get_header_bit_field_lengths(record, &payload_size)?;
 
     out.push(convert_bit_field_lengths_to_bit_fields(&bit_field_lengths));
 
@@ -14,13 +13,14 @@ pub fn record_to_bytes(record: Record) -> Result<Vec<u8>, WpilogReadErrors> {
         bit_field_lengths.entry_id_length,
     ));
     out.append(&mut read_n_bytes_of_val(
-        record.data.get_size()? as u64,
+        payload_size as u64,
         bit_field_lengths.payload_length,
     ));
     out.append(&mut read_n_bytes_of_val(
-        record.time_stamp.as_micros() as u64,
+        record.timestamp.as_micros() as u64,
         bit_field_lengths.timestamp_length,
     ));
+    out.append(&mut payload);
 
     Ok(out)
 }
@@ -30,10 +30,10 @@ fn read_n_bytes_of_val(val: u64, n: u8) -> Vec<u8> {
     out.reserve_exact(n as usize);
 
     for i in 0..n {
-        out.push(((val | (0xff >> i * 0xff)) << i * 0xff) as u8)
+        out.push(((val | (0xff00000000000000 >> (i * 8))) << (i * 8)) as u8)
     }
 
-    return out;
+    out
 }
 
 struct BitFieldLengths {
@@ -42,11 +42,14 @@ struct BitFieldLengths {
     timestamp_length: u8,
 }
 
-fn get_header_bit_field_lengths(record: &Record) -> Result<BitFieldLengths, WpilogReadErrors> {
+fn get_header_bit_field_lengths(
+    record: &Record,
+    data_size: &u32,
+) -> Result<BitFieldLengths, WpilogReadErrors> {
     let entry_id_length = size_to_num_bytes(record.entry_id as u64);
-    let payload_size = record.data.get_size()?;
-    let payload_length = size_to_num_bytes(payload_size as u64);
-    let timestamp_length = size_to_num_bytes(record.time_stamp.as_micros() as u64);
+    let payload_size = data_size;
+    let payload_length = size_to_num_bytes(*payload_size as u64);
+    let timestamp_length = size_to_num_bytes(record.timestamp.as_micros() as u64);
 
     Ok(BitFieldLengths {
         entry_id_length,
@@ -61,7 +64,7 @@ fn convert_bit_field_lengths_to_bit_fields(bit_field_lengths: &BitFieldLengths) 
     bit_field |= (bit_field_lengths.payload_length - 1) | 0b00001100;
     bit_field |= (bit_field_lengths.timestamp_length - 1) | 0b0111000;
 
-    return bit_field;
+    bit_field
 }
 
 fn size_to_num_bytes(length: u64) -> u8 {
