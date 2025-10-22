@@ -21,19 +21,9 @@ struct Wpilog {
     entry_lut: HashMap<u32, Entry>,
 }
 
-fn read_wpilog(path: &str) -> Result<Wpilog, WpilogReadErrors> {
-    let mut file = match File::open(path) {
-        Ok(f) => f,
-        Err(err) => return Err(WpilogReadErrors::IoError(err)),
-    };
-    let mut file_content = Vec::new();
-    match file.read_to_end(&mut file_content) {
-        Ok(n) => _ = n,
-        Err(err) => return Err(WpilogReadErrors::IoError(err)),
-    };
-
+fn read_wpilog(data: Vec<u8>) -> Result<Wpilog, WpilogReadErrors> {
     let mut entry_lut: HashMap<u32, Entry> = HashMap::new();
-    let mut file_to_read: (Vec<u8>, usize) = (file_content, 0);
+    let mut file_to_read: (Vec<u8>, usize) = (data, 0);
     let header = read_header(&mut file_to_read)?;
 
     let mut record_num = 0;
@@ -57,7 +47,10 @@ fn main() {
         let raw_path_str = path.unwrap().path();
         let path_str = raw_path_str.to_str().unwrap();
         if path_str.ends_with(".wpilog") {
-            let wpilog = read_wpilog(path_str).unwrap();
+            let mut file = File::open(path_str).unwrap();
+            let mut file_content = Vec::new();
+            file.read_to_end(&mut file_content).unwrap();
+            let wpilog = read_wpilog(file_content).unwrap();
             println!("{}", path_str);
             for (_, entry) in wpilog.entry_lut {
                 //println!("metadata:{:?}", entry.meta_data);

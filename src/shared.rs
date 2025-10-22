@@ -3,8 +3,6 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum WpilogReadErrors {
-    #[error("file io error")]
-    IoError(#[from] io::Error),
     #[error("no data left in file")]
     NoDataLeft,
     #[error("header not valid")]
