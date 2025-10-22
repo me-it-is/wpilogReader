@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 dirs = "6.0.0"
-serde_json = "1.0.142"
 thiserror = "2.0.12"
 
 [profile.release]

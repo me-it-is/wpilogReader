@@ -45,22 +45,14 @@ impl Entry {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Metadata {
-    pub metadata: Option<serde_json::Value>,
+    pub metadata: String,
 }
 
 impl Metadata {
     pub fn to_bytes(&self) -> Result<Vec<u8>, WpilogReadErrors> {
         let mut out = vec![];
-        let metadata_string = match &self.metadata {
-            None => "".to_string(),
-            Some(d) => match serde_json::from_value(d.clone()) {
-                Err(_) => return Err(WpilogReadErrors::CantEncodeRecord),
-                Ok(s) => s,
-            },
-        };
-        out.extend_from_slice((metadata_string.len() as u32).to_le_bytes().as_slice());
-        out.extend_from_slice(metadata_string.as_bytes());
-
+        out.extend_from_slice((self.metadata.len() as u32).to_le_bytes().as_slice());
+        out.extend_from_slice(self.metadata.as_bytes());
         Ok(out)
     }
 }
@@ -89,7 +81,7 @@ pub enum RecordData {
     FloatArray(Vec<f32>),
     DoubleArray(Vec<f64>),
     StringArray(Vec<String>),
-    Json(Option<serde_json::Value>),
+    Json(String),
     MessagePack(Vec<u8>),
     Struct(Vec<u8>),
     StructArray(Vec<u8>),
@@ -120,10 +112,7 @@ impl RecordData {
             RecordData::FloatArray(d) => convert_array_to_bytes(d, &f32::to_le_bytes),
             RecordData::DoubleArray(d) => convert_array_to_bytes(d, &f64::to_le_bytes),
             RecordData::StringArray(d) => convert_string_array_to_bytes(d),
-            RecordData::Json(d) => match serde_json::to_string(&d) {
-                Err(_) => return Err(WpilogReadErrors::CantEncodeRecord),
-                Ok(s) => s.as_bytes().to_vec(),
-            },
+            RecordData::Json(d) => d.clone().into_bytes(),
             RecordData::MessagePack(d) => d.clone(),
             RecordData::Struct(d) => d.clone(),
             RecordData::StructArray(d) => d.clone(),
@@ -412,17 +401,14 @@ fn process_data_from_standard_record(
                 });
             }
         },
-        DataType::Json => RecordData::Json(match data.len() {
-            0 => None,
-            _ => match serde_json::from_slice(&data) {
-                Ok(j) => j,
-                Err(_) => {
-                    return Err(WpilogReadErrors::MalformedData {
-                        record_num: current_record,
-                        entry_id,
-                    });
-                }
-            },
+        DataType::Json => RecordData::Json(match String::from_utf8(data) {
+            Ok(s) => s,
+            Err(_) => {
+                return Err(WpilogReadErrors::InvalidRecoard {
+                    record_num: current_record,
+                    entry_id: current_record,
+                });
+            }
         }),
         DataType::MessagePack => RecordData::MessagePack(data),
         DataType::Struct(_) => RecordData::Struct(data),
@@ -501,18 +487,14 @@ pub fn process_metadata(
     current_record: u32,
     entry_id: u32,
 ) -> Result<Metadata, WpilogReadErrors> {
-    let metadata = if data.is_empty() {
-        None
-    } else {
-        Some(match serde_json::from_slice(&data) {
-            Ok(j) => j,
-            Err(_) => {
-                return Err(WpilogReadErrors::MalformedData {
-                    record_num: current_record,
-                    entry_id,
-                });
-            }
-        })
+    let metadata = match String::from_utf8(data) {
+        Ok(j) => j,
+        Err(_) => {
+            return Err(WpilogReadErrors::MalformedData {
+                record_num: current_record,
+                entry_id,
+            });
+        }
     };
     Ok(Metadata { metadata })
 }
