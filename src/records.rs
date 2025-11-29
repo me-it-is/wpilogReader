@@ -372,19 +372,19 @@ fn process_data_from_standard_record<'a>(
         DataType::BooleanArray => {
             RecordData::BooleanArray(process_boolean_array_data(data, current_record, entry_id)?)
         }
-        DataType::IntegerArray => RecordData::IntegerArray(process_array_data_no_err(
+        DataType::IntegerArray => RecordData::IntegerArray(process_array_data(
             data,
             &i64::from_le_bytes,
             current_record,
             entry_id,
         )?),
-        DataType::FloatArray => RecordData::FloatArray(process_array_data_no_err(
+        DataType::FloatArray => RecordData::FloatArray(process_array_data(
             data,
             &f32::from_le_bytes,
             current_record,
             entry_id,
         )?),
-        DataType::DoubleArray => RecordData::DoubleArray(process_array_data_no_err(
+        DataType::DoubleArray => RecordData::DoubleArray(process_array_data(
             data,
             &f64::from_le_bytes,
             current_record,
@@ -435,7 +435,7 @@ fn process_boolean_array_data<'a>(
     Ok(unsafe { core::slice::from_raw_parts(data.as_ptr() as *const bool, data.len()) })
 }
 
-fn process_array_data_no_err<T, const DATA_SIZE: usize>(
+fn process_array_data<T, const DATA_SIZE: usize>(
     data: &[u8],
     from_func: &dyn Fn([u8; DATA_SIZE]) -> T,
     current_record: u32,
@@ -446,27 +446,6 @@ fn process_array_data_no_err<T, const DATA_SIZE: usize>(
 
     for e in entries.by_ref() {
         out.push(from_func(e.try_into().unwrap()));
-    }
-    if !entries.remainder().is_empty() {
-        return Err(WpilogReadErrors::MalformedData {
-            record_num: current_record,
-            entry_id,
-        });
-    }
-    Ok(out)
-}
-
-fn process_array_data<T, const DATA_SIZE: usize>(
-    data: Vec<u8>,
-    from_func: &dyn Fn([u8; DATA_SIZE]) -> Result<T, WpilogReadErrors>,
-    current_record: u32,
-    entry_id: u32,
-) -> Result<Vec<T>, WpilogReadErrors> {
-    let mut out = Vec::new();
-    let mut entries = data.chunks_exact(DATA_SIZE);
-
-    for e in entries.by_ref() {
-        out.push(from_func(e.try_into().unwrap())?);
     }
     if !entries.remainder().is_empty() {
         return Err(WpilogReadErrors::MalformedData {
