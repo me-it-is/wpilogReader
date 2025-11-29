@@ -441,7 +441,7 @@ fn process_array_data_no_err<T, const DATA_SIZE: usize>(
     current_record: u32,
     entry_id: u32,
 ) -> Result<Vec<T>, WpilogReadErrors> {
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(data.len());
     let mut entries = data.chunks_exact(DATA_SIZE);
 
     for e in entries.by_ref() {
