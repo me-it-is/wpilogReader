@@ -1,27 +1,33 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use bytemuck::{AnyBitPattern, try_cast_slice};
+
 use crate::control_records::{
     FinishRecordData, SetMetaDataRecordData, StartRecordData, process_control_record,
 };
-use crate::shared::{WpilogReadErrors, bool_to_byte, next_chunk, next_chunk_vec, pad_to_n_bytes};
+
+use crate::shared::{
+    WpilogReadErrors, bool_to_byte, next_chunk, next_chunk_slice, no_data_err_if_none,
+    pad_to_n_bytes,
+};
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub struct EntryMetadata {
+pub struct EntryMetadata<'a> {
     pub start_record_index: u32,
-    name: String,
+    name: &'a str,
     data_type: DataType,
-    pub metadata: Metadata,
+    pub metadata: Metadata<'a>,
     pub finish_record_index: Option<u32>,
 }
 
-impl EntryMetadata {
-    pub fn new(
+impl EntryMetadata<'_> {
+    pub fn new<'a>(
         start_record_index: u32,
-        name: String,
+        name: &'a str,
         data_type: DataType,
-        metadata: Metadata,
-    ) -> EntryMetadata {
+        metadata: Metadata<'a>,
+    ) -> EntryMetadata<'a> {
         EntryMetadata {
             start_record_index,
             name,
@@ -33,22 +39,22 @@ impl EntryMetadata {
 }
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct Entry {
-    pub meta_data: Vec<EntryMetadata>,
-    pub records: Vec<Record>,
+pub struct Entry<'a> {
+    pub meta_data: Vec<EntryMetadata<'a>>,
+    pub records: Vec<Record<'a>>,
 }
-impl Entry {
-    pub fn new(meta_data: Vec<EntryMetadata>, records: Vec<Record>) -> Entry {
+impl Entry<'_> {
+    pub fn new<'a>(meta_data: Vec<EntryMetadata<'a>>, records: Vec<Record<'a>>) -> Entry<'a> {
         Entry { meta_data, records }
     }
 }
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub struct Metadata {
-    pub metadata: String,
+pub struct Metadata<'a> {
+    pub metadata: &'a str,
 }
 
-impl Metadata {
+impl Metadata<'_> {
     pub fn to_bytes(&self) -> Result<Vec<u8>, WpilogReadErrors> {
         let mut out = vec![];
         out.extend_from_slice((self.metadata.len() as u32).to_le_bytes().as_slice());
@@ -59,73 +65,69 @@ impl Metadata {
 
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct Record {
+pub struct Record<'a> {
     pub entry_id: u32,
     pub timestamp: Duration,
-    pub data: RecordData,
+    pub data: RecordData<'a>,
 }
 #[allow(dead_code)]
 #[derive(Debug)]
-pub enum RecordData {
-    Start(StartRecordData),
+pub enum RecordData<'a> {
+    Start(StartRecordData<'a>),
     Finish(FinishRecordData),
-    SetMetadata(SetMetaDataRecordData),
-    Raw(Vec<u8>),
+    SetMetadata(SetMetaDataRecordData<'a>),
+    Raw(&'a [u8]),
     Boolean(bool),
     Integer(i64),
     Float(f32),
     Double(f64),
-    String(String),
-    BooleanArray(Vec<bool>),
-    IntegerArray(Vec<i64>),
-    FloatArray(Vec<f32>),
-    DoubleArray(Vec<f64>),
-    StringArray(Vec<String>),
-    Json(String),
-    MessagePack(Vec<u8>),
-    Struct(Vec<u8>),
-    StructArray(Vec<u8>),
-    PhotonStruct(Vec<u8>),
-    ProtoBuff(Vec<u8>),
-    Other(Vec<u8>),
+    String(&'a str),
+    BooleanArray(&'a [bool]),
+    IntegerArray(&'a [i64]),
+    FloatArray(&'a [f32]),
+    DoubleArray(&'a [f64]),
+    StringArray(Vec<&'a str>),
+    Json(&'a str),
+    MessagePack(&'a [u8]),
+    Struct(&'a [u8]),
+    StructArray(&'a [u8]),
+    PhotonStruct(&'a [u8]),
+    ProtoBuff(&'a [u8]),
+    Other(&'a [u8]),
 }
-impl RecordData {
-    pub fn to_bytes(&self) -> Result<Vec<u8>, WpilogReadErrors> {
+impl RecordData<'_> {
+    pub fn to_bytes<'a>(&'a self) -> Result<Vec<u8>, WpilogReadErrors> {
         let bytes = match self {
             RecordData::Start(d) => d.to_bytes()?,
             RecordData::Finish(d) => d.to_bytes(),
             RecordData::SetMetadata(d) => d.to_bytes()?,
-            RecordData::Raw(d) => d.clone(),
-            RecordData::Boolean(d) => vec![bool_to_byte(d)],
+            RecordData::Raw(d) => d.to_vec(),
+            RecordData::Boolean(d) => [bool_to_byte(d)].to_vec(),
             RecordData::Integer(d) => d.to_le_bytes().to_vec(),
             RecordData::Float(d) => d.to_le_bytes().to_vec(),
             RecordData::Double(d) => d.to_le_bytes().to_vec(),
-            RecordData::String(d) => {
-                let mut out = (d.len()).to_le_bytes().to_vec();
-                out.append(&mut d.as_bytes().to_vec());
-                out
-            }
+            RecordData::String(d) => [&d.len().to_le_bytes(), d.as_bytes()].concat(),
             RecordData::BooleanArray(d) => {
-                convert_array_to_bytes(d, &|boolean: bool| [bool_to_byte(&boolean)])
+                convert_array_to_bytes(d, &|boolean: bool| [bool_to_byte(&boolean)]).to_vec()
             }
-            RecordData::IntegerArray(d) => convert_array_to_bytes(d, &i64::to_le_bytes),
-            RecordData::FloatArray(d) => convert_array_to_bytes(d, &f32::to_le_bytes),
-            RecordData::DoubleArray(d) => convert_array_to_bytes(d, &f64::to_le_bytes),
-            RecordData::StringArray(d) => convert_string_array_to_bytes(d),
-            RecordData::Json(d) => d.clone().into_bytes(),
-            RecordData::MessagePack(d) => d.clone(),
-            RecordData::Struct(d) => d.clone(),
-            RecordData::StructArray(d) => d.clone(),
-            RecordData::PhotonStruct(d) => d.clone(),
-            RecordData::ProtoBuff(d) => d.clone(),
-            RecordData::Other(d) => d.clone(),
+            RecordData::IntegerArray(d) => convert_array_to_bytes(d, &i64::to_le_bytes).to_vec(),
+            RecordData::FloatArray(d) => convert_array_to_bytes(d, &f32::to_le_bytes).to_vec(),
+            RecordData::DoubleArray(d) => convert_array_to_bytes(d, &f64::to_le_bytes).to_vec(),
+            RecordData::StringArray(d) => convert_string_array_to_bytes(d).to_vec(),
+            RecordData::Json(d) => d.as_bytes().to_vec(),
+            RecordData::MessagePack(d) => d.to_vec(),
+            RecordData::Struct(d) => d.to_vec(),
+            RecordData::StructArray(d) => d.to_vec(),
+            RecordData::PhotonStruct(d) => d.to_vec(),
+            RecordData::ProtoBuff(d) => d.to_vec(),
+            RecordData::Other(d) => d.to_vec(),
         };
 
         Ok(bytes)
     }
 }
-fn convert_array_to_bytes<T: Clone, const DATA_SIZE: usize>(
-    array: &Vec<T>,
+fn convert_array_to_bytes<'a, T: Clone, const DATA_SIZE: usize>(
+    array: &[T],
     from_func: &dyn Fn(T) -> [u8; DATA_SIZE],
 ) -> Vec<u8> {
     let mut out = vec![];
@@ -135,7 +137,7 @@ fn convert_array_to_bytes<T: Clone, const DATA_SIZE: usize>(
     out
 }
 
-fn convert_string_array_to_bytes(array: &Vec<String>) -> Vec<u8> {
+fn convert_string_array_to_bytes<'a>(array: &'a [&str]) -> Vec<u8> {
     let mut out = vec![];
 
     for str in array {
@@ -239,11 +241,11 @@ fn process_structs_and_stuff_type_from_string(str: &str) -> Result<DataType, Wpi
     Ok(DataType::Other(str.to_owned()))
 }
 
-fn get_current_entry_data(
-    entry_lut: &HashMap<u32, Entry>,
+fn get_current_entry_data<'a>(
+    entry_lut: &'a HashMap<u32, Entry<'a>>,
     current_record: u32,
     entry_id: u32,
-) -> Result<&EntryMetadata, WpilogReadErrors> {
+) -> Result<&'a EntryMetadata<'a>, WpilogReadErrors> {
     let current_id_data = match entry_lut.get(&entry_id) {
         Some(l) => &l.meta_data,
         None => {
@@ -271,34 +273,33 @@ fn get_current_entry_data(
     })
 }
 
-pub fn read_next_record(
-    file: &mut (Vec<u8>, usize),
-    entry_lut: &mut HashMap<u32, Entry>,
+pub fn read_next_record<'a>(
+    file: &mut &'a [u8],
+    entry_lut: &mut HashMap<u32, Entry<'a>>,
     current_record: u32,
 ) -> Result<(), WpilogReadErrors> {
-    let header_bit_field = next_chunk::<1>(file)?[0];
+    let header_bit_field = no_data_err_if_none!(next_chunk::<1>(file))[0];
 
-    let entry_id = u32::from_le_bytes(pad_to_n_bytes(next_chunk_vec(
+    let entry_id = u32::from_le_bytes(pad_to_n_bytes(no_data_err_if_none!(next_chunk_slice(
         file,
         ((header_bit_field & 0b000011) + 1) as usize,
-    )?));
+    ))));
 
-    let raw_payload_size = pad_to_n_bytes(next_chunk_vec(
+    let raw_payload_size = pad_to_n_bytes(no_data_err_if_none!(next_chunk_slice(
         file,
         (((header_bit_field & 0b00001100) >> 2) + 1) as usize,
-    )?);
+    )));
     let payload_size = u32::from_le_bytes(raw_payload_size);
 
-    let time_stamp_microseconds = u64::from_le_bytes(pad_to_n_bytes(next_chunk_vec(
-        file,
-        (((header_bit_field & 0b01110000) >> 4) + 1) as usize,
-    )?));
+    let time_stamp_microseconds = u64::from_le_bytes(pad_to_n_bytes(no_data_err_if_none!(
+        next_chunk_slice(file, (((header_bit_field & 0b01110000) >> 4) + 1) as usize,)
+    )));
     let time_stamp = Duration::from_micros(time_stamp_microseconds);
 
     let data = if entry_id == 0 {
         process_control_record(file, current_record, entry_lut)?
     } else {
-        let raw_data = next_chunk_vec(file, payload_size as usize)?;
+        let raw_data = no_data_err_if_none!(next_chunk_slice(file, payload_size as usize));
         process_data_from_standard_record(
             &get_current_entry_data(entry_lut, current_record, entry_id)?.data_type,
             raw_data,
@@ -343,12 +344,12 @@ fn process_boolean(
     }
 }
 
-fn process_data_from_standard_record(
+fn process_data_from_standard_record<'a>(
     data_type: &DataType,
-    data: Vec<u8>,
+    data: &'a [u8],
     current_record: u32,
     entry_id: u32,
-) -> Result<RecordData, WpilogReadErrors> {
+) -> Result<RecordData<'a>, WpilogReadErrors> {
     let data_type = match data_type {
         DataType::Raw => RecordData::Raw(data),
         DataType::Boolean => RecordData::Boolean(process_boolean(
@@ -359,7 +360,7 @@ fn process_data_from_standard_record(
         DataType::Integer => RecordData::Integer(i64::from_le_bytes(data.try_into().unwrap())),
         DataType::Float => RecordData::Float(f32::from_le_bytes(data.try_into().unwrap())),
         DataType::Double => RecordData::Double(f64::from_le_bytes(data.try_into().unwrap())),
-        DataType::String => RecordData::String(match String::from_utf8(data) {
+        DataType::String => RecordData::String(match str::from_utf8(data) {
             Ok(s) => s,
             Err(_) => {
                 return Err(WpilogReadErrors::MalformedData {
@@ -368,30 +369,18 @@ fn process_data_from_standard_record(
                 });
             }
         }),
-        DataType::BooleanArray => RecordData::BooleanArray(process_array_data(
-            data,
-            &|byte: [u8; 1]| process_boolean(byte, current_record, entry_id),
-            current_record,
-            entry_id,
-        )?),
-        DataType::IntegerArray => RecordData::IntegerArray(process_array_data_no_err(
-            data,
-            &i64::from_le_bytes,
-            current_record,
-            entry_id,
-        )?),
-        DataType::FloatArray => RecordData::FloatArray(process_array_data_no_err(
-            data,
-            &f32::from_le_bytes,
-            current_record,
-            entry_id,
-        )?),
-        DataType::DoubleArray => RecordData::DoubleArray(process_array_data_no_err(
-            data,
-            &f64::from_le_bytes,
-            current_record,
-            entry_id,
-        )?),
+        DataType::BooleanArray => {
+            RecordData::BooleanArray(process_boolean_array_data(data, current_record, entry_id)?)
+        }
+        DataType::IntegerArray => {
+            RecordData::IntegerArray(process_array_data_no_err(data, current_record, entry_id)?)
+        }
+        DataType::FloatArray => {
+            RecordData::FloatArray(process_array_data_no_err(data, current_record, entry_id)?)
+        }
+        DataType::DoubleArray => {
+            RecordData::DoubleArray(process_array_data_no_err(data, current_record, entry_id)?)
+        }
         DataType::StringArray => match process_string_array(data, current_record, entry_id) {
             Ok(sa) => sa,
             Err(_) => {
@@ -401,7 +390,7 @@ fn process_data_from_standard_record(
                 });
             }
         },
-        DataType::Json => RecordData::Json(match String::from_utf8(data) {
+        DataType::Json => RecordData::Json(match str::from_utf8(data) {
             Ok(s) => s,
             Err(_) => {
                 return Err(WpilogReadErrors::InvalidRecoard {
@@ -420,54 +409,61 @@ fn process_data_from_standard_record(
     Ok(data_type)
 }
 
-fn process_array_data_no_err<T, const DATA_SIZE: usize>(
-    data: Vec<u8>,
-    from_func: &dyn Fn([u8; DATA_SIZE]) -> T,
+fn process_boolean_array_data<'a>(
+    data: &'a [u8],
     current_record: u32,
     entry_id: u32,
-) -> Result<Vec<T>, WpilogReadErrors> {
-    process_array_data(
-        data,
-        &|data: [u8; DATA_SIZE]| Ok(from_func(data)),
-        current_record,
-        entry_id,
-    )
+) -> Result<&'a [bool], WpilogReadErrors> {
+    for d in data {
+        if !(*d == 0 || *d == 1) {
+            return Err(WpilogReadErrors::MalformedData {
+                record_num: current_record,
+                entry_id,
+            });
+        }
+    }
+
+    Ok(unsafe { core::slice::from_raw_parts(data.as_ptr() as *const bool, data.len()) })
 }
 
-fn process_array_data<T, const DATA_SIZE: usize>(
-    data: Vec<u8>,
-    from_func: &dyn Fn([u8; DATA_SIZE]) -> Result<T, WpilogReadErrors>,
+fn process_array_data_no_err<'a, T: AnyBitPattern>(
+    data: &'a [u8],
     current_record: u32,
     entry_id: u32,
-) -> Result<Vec<T>, WpilogReadErrors> {
-    let mut out = Vec::new();
-    let mut entries = data.chunks_exact(DATA_SIZE);
+) -> Result<&'a [T], WpilogReadErrors> {
+    process_array_data(data, current_record, entry_id)
+}
 
-    for e in entries.by_ref() {
-        out.push(from_func(e.try_into().unwrap())?);
-    }
-    if !entries.remainder().is_empty() {
-        return Err(WpilogReadErrors::MalformedData {
+fn process_array_data<'a, T: AnyBitPattern>(
+    data: &'a [u8],
+    current_record: u32,
+    entry_id: u32,
+) -> Result<&'a [T], WpilogReadErrors> {
+    match try_cast_slice(data) {
+        Ok(d) => Ok(d),
+        Err(_) => Err(WpilogReadErrors::MalformedData {
             record_num: current_record,
             entry_id,
-        });
+        }),
     }
-    Ok(out)
 }
 
-fn process_string_array(
-    data: Vec<u8>,
+fn process_string_array<'a>(
+    data: &'a [u8],
     current_record: u32,
     entry_id: u32,
-) -> Result<RecordData, WpilogReadErrors> {
-    let mut indexer = (data, 0);
-    let length = u32::from_le_bytes(next_chunk(&mut indexer)?);
+) -> Result<RecordData<'a>, WpilogReadErrors> {
+    let mut indexer = data;
+    let length = u32::from_le_bytes(no_data_err_if_none!(next_chunk(&mut indexer)));
     let mut out = Vec::new();
 
     for _i in 0..length {
-        let string_length = u32::from_le_bytes(next_chunk(&mut indexer)?);
+        let string_length = u32::from_le_bytes(no_data_err_if_none!(next_chunk(&mut indexer)));
         out.push(
-            match String::from_utf8(next_chunk_vec(&mut indexer, string_length as usize)?) {
+            match str::from_utf8(no_data_err_if_none!(next_chunk_slice(
+                &mut indexer,
+                string_length as usize
+            ))) {
                 Ok(s) => s,
                 Err(_) => {
                     return Err(WpilogReadErrors::MalformedData {
@@ -483,11 +479,11 @@ fn process_string_array(
 }
 
 pub fn process_metadata(
-    data: Vec<u8>,
+    data: &[u8],
     current_record: u32,
     entry_id: u32,
 ) -> Result<Metadata, WpilogReadErrors> {
-    let metadata = match String::from_utf8(data) {
+    let metadata = match str::from_utf8(data) {
         Ok(j) => j,
         Err(_) => {
             return Err(WpilogReadErrors::MalformedData {

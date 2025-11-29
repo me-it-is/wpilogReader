@@ -16,14 +16,14 @@ use records::{Entry, read_next_record};
 use shared::WpilogReadErrors;
 
 #[allow(dead_code)]
-struct Wpilog {
+struct Wpilog<'a> {
     header: FileHeader,
-    entry_lut: HashMap<u32, Entry>,
+    entry_lut: HashMap<u32, Entry<'a>>,
 }
 
-fn read_wpilog(data: Vec<u8>) -> Result<Wpilog, WpilogReadErrors> {
-    let mut entry_lut: HashMap<u32, Entry> = HashMap::new();
-    let mut file_to_read: (Vec<u8>, usize) = (data, 0);
+fn read_wpilog<'a>(data: &'a [u8]) -> Result<Wpilog<'a>, WpilogReadErrors> {
+    let mut entry_lut: HashMap<u32, Entry<'a>> = HashMap::new();
+    let mut file_to_read: &'a [u8] = data;
     let header = read_header(&mut file_to_read)?;
 
     let mut record_num = 0;
@@ -36,7 +36,10 @@ fn read_wpilog(data: Vec<u8>) -> Result<Wpilog, WpilogReadErrors> {
         record_num += 1;
     }
 
-    Ok(Wpilog { header, entry_lut })
+    Ok(Wpilog {
+        header,
+        entry_lut: entry_lut,
+    })
 }
 
 fn main() {
@@ -50,11 +53,11 @@ fn main() {
             let mut file = File::open(path_str).unwrap();
             let mut file_content = Vec::new();
             file.read_to_end(&mut file_content).unwrap();
-            let wpilog = read_wpilog(file_content).unwrap();
+            let wpilog = read_wpilog(file_content.as_slice()).unwrap();
             println!("{}", path_str);
             for (_, entry) in wpilog.entry_lut {
                 //println!("metadata:{:?}", entry.meta_data);
-                for record in entry.records {
+                for record in &entry.records {
                     _ = record_to_bytes(&record);
                 }
             }

@@ -1,5 +1,26 @@
-use std::io;
 use thiserror::Error;
+
+macro_rules! err_if_none {
+    ($val:expr, $err:expr) => {
+        match $val {
+            None => return Err($err),
+            Some(d) => d,
+        }
+    };
+}
+
+pub(crate) use err_if_none;
+
+macro_rules! no_data_err_if_none {
+    ($val:expr) => {
+        match $val {
+            None => return Err(WpilogReadErrors::NoDataLeft),
+            Some(d) => d,
+        }
+    };
+}
+
+pub(crate) use no_data_err_if_none;
 
 #[derive(Debug, Error)]
 pub enum WpilogReadErrors {
@@ -26,7 +47,7 @@ pub enum WpilogReadErrors {
     #[error("cant decode a record")]
     CantEncodeRecord,
 }
-pub fn pad_to_n_bytes<const SIZE: usize>(data: Vec<u8>) -> [u8; SIZE] {
+pub fn pad_to_n_bytes<const SIZE: usize>(data: &[u8]) -> [u8; SIZE] {
     let mut arr: [u8; SIZE] = [0; SIZE];
     for (i, byte) in arr.iter_mut().enumerate() {
         *byte = match data.get(i) {
@@ -37,39 +58,24 @@ pub fn pad_to_n_bytes<const SIZE: usize>(data: Vec<u8>) -> [u8; SIZE] {
     arr
 }
 
-pub fn next_chunk<const SIZE: usize>(
-    file: &mut (Vec<u8>, usize),
-) -> Result<[u8; SIZE], WpilogReadErrors> {
-    let mut out = [0; SIZE];
-    let mut iter = file.0.iter().skip(file.1);
-    for byte in out.iter_mut() {
-        *byte = match iter.next() {
-            Some(n) => *n,
-            None => return Err(WpilogReadErrors::NoDataLeft),
-        };
-    }
-    file.1 += SIZE;
-
-    Ok(out)
+pub fn next_chunk<const SIZE: usize>(file: &mut &[u8]) -> Option<[u8; SIZE]> {
+    let split = file.split_first_chunk();
+    let (out, remaining_file) = match split {
+        None => return None,
+        Some(d) => d,
+    };
+    *file = remaining_file;
+    Some(*out)
 }
-pub fn next_chunk_vec(
-    file: &mut (Vec<u8>, usize),
-    size: usize,
-) -> Result<Vec<u8>, WpilogReadErrors> {
-    let mut out: Vec<u8> = Vec::new();
-    out.reserve_exact(size);
-    let mut iter = file.0.iter().skip(file.1);
-    for _i in 0..size {
-        out.push(
-            *(match iter.next() {
-                Some(n) => n,
-                None => return Err(WpilogReadErrors::NoDataLeft),
-            }),
-        );
-    }
-    file.1 += size;
 
-    Ok(out)
+pub fn next_chunk_slice<'a>(file: &mut &'a [u8], size: usize) -> Option<&'a [u8]> {
+    let split = file.split_at_checked(size);
+    let (out, remaining_file) = match split {
+        None => return None,
+        Some(d) => d,
+    };
+    *file = remaining_file;
+    Some(out)
 }
 pub fn bool_to_byte(bool: &bool) -> u8 {
     match bool {

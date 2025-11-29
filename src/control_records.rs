@@ -1,5 +1,6 @@
 use crate::records::{DataType, Entry, EntryMetadata, Metadata, RecordData, process_metadata};
-use crate::shared::{WpilogReadErrors, next_chunk, next_chunk_vec};
+use crate::shared::{WpilogReadErrors, next_chunk, next_chunk_slice, no_data_err_if_none};
+
 use std::collections::HashMap;
 pub enum ControlTypes {
     Start,
@@ -8,20 +9,22 @@ pub enum ControlTypes {
 }
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct StartRecordData {
+pub struct StartRecordData<'a> {
     entry_id_to_be_started: u32,
-    entry_name: String,
+    entry_name: &'a str,
     entry_type: DataType,
-    entry_metadata: Metadata,
+    entry_metadata: Metadata<'a>,
 }
-impl StartRecordData {
+impl StartRecordData<'_> {
     pub fn to_bytes(&self) -> Result<Vec<u8>, WpilogReadErrors> {
-        let mut out = vec![];
-        out.push(0);
-        out.extend_from_slice(self.entry_id_to_be_started.to_le_bytes().as_slice());
-        out.extend_from_slice((self.entry_name.len() as u32).to_le_bytes().as_slice());
-        out.extend_from_slice(self.entry_name.as_bytes());
-        out.extend_from_slice(self.entry_metadata.to_bytes()?.as_slice());
+        let out = [
+            &[0],
+            self.entry_id_to_be_started.to_le_bytes().as_slice(),
+            (self.entry_name.len() as u32).to_le_bytes().as_slice(),
+            self.entry_name.as_bytes(),
+            self.entry_metadata.to_bytes()?.as_slice(),
+        ]
+        .concat();
         Ok(out)
     }
 }
@@ -32,32 +35,36 @@ pub struct FinishRecordData {
 }
 impl FinishRecordData {
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = vec![1];
-        out.extend_from_slice(self.entry_to_be_finished.to_le_bytes().as_slice());
-        out
+        [&[1], self.entry_to_be_finished.to_le_bytes().as_slice()].concat()
     }
 }
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct SetMetaDataRecordData {
+pub struct SetMetaDataRecordData<'a> {
     entry_to_be_edited: u32,
-    entry_new_metadata: Metadata,
+    entry_new_metadata: Metadata<'a>,
 }
-impl SetMetaDataRecordData {
+impl SetMetaDataRecordData<'_> {
     pub fn to_bytes(&self) -> Result<Vec<u8>, WpilogReadErrors> {
-        let mut out = vec![2];
-        out.extend_from_slice(self.entry_to_be_edited.to_le_bytes().as_slice());
-        out.extend_from_slice(self.entry_new_metadata.to_bytes()?.as_slice());
+        let out = [
+            &[2],
+            self.entry_to_be_edited.to_le_bytes().as_slice(),
+            self.entry_new_metadata.to_bytes()?.as_slice(),
+        ]
+        .concat();
         Ok(out)
     }
 }
 
-pub fn process_control_record(
-    file: &mut (Vec<u8>, usize),
+pub fn process_control_record<'a>(
+    file: &mut &'a [u8],
     current_record: u32,
-    entry_lut: &mut HashMap<u32, Entry>,
-) -> Result<RecordData, WpilogReadErrors> {
-    let raw_control_type = next_chunk::<1>(file)?[0];
+    entry_lut: &mut HashMap<u32, Entry<'a>>,
+) -> Result<RecordData<'a>, WpilogReadErrors> {
+    let raw_control_type = match next_chunk::<1>(file) {
+        Some(value) => value[0],
+        None => return Err(WpilogReadErrors::NoDataLeft),
+    };
     let control_type = match raw_control_type {
         0 => ControlTypes::Start,
         1 => ControlTypes::Finish,
@@ -70,23 +77,25 @@ pub fn process_control_record(
         }
     };
 
-    match control_type {
+    let out = match control_type {
         ControlTypes::Start => process_start_recoard(file, current_record, entry_lut),
         ControlTypes::Finish => process_finish_recoard(file, current_record, entry_lut),
         ControlTypes::SetMetadata => process_set_metadata_recoard(file, entry_lut, current_record),
-    }
+    };
+    out
 }
 
-fn process_start_recoard(
-    file: &mut (Vec<u8>, usize),
+fn process_start_recoard<'a>(
+    file: &mut &'a [u8],
     current_record: u32,
-    entry_lut: &mut HashMap<u32, Entry>,
-) -> Result<RecordData, WpilogReadErrors> {
-    let entry_id_to_be_started = u32::from_le_bytes(next_chunk(file)?);
+    entry_lut: &mut HashMap<u32, Entry<'a>>,
+) -> Result<RecordData<'a>, WpilogReadErrors> {
+    let entry_id_to_be_started = u32::from_le_bytes(no_data_err_if_none!(next_chunk(file)));
 
-    let entry_name_length = u32::from_le_bytes(next_chunk(file)?);
-    let entry_name_string_raw = next_chunk_vec(file, entry_name_length as usize)?;
-    let entry_name = match str::from_utf8(entry_name_string_raw.as_slice()) {
+    let entry_name_length = u32::from_le_bytes(no_data_err_if_none!(next_chunk(file)));
+    let entry_name_string_raw =
+        no_data_err_if_none!(next_chunk_slice(file, entry_name_length as usize));
+    let entry_name = match str::from_utf8(entry_name_string_raw) {
         Ok(s) => s,
         Err(_) => {
             return Err(WpilogReadErrors::InvalidRecoard {
@@ -94,12 +103,12 @@ fn process_start_recoard(
                 entry_id: 0,
             });
         }
-    }
-    .to_string();
+    };
 
-    let entry_type_length = u32::from_le_bytes(next_chunk(file)?);
-    let entry_type_string_raw = next_chunk_vec(file, entry_type_length as usize)?;
-    let entry_type_string = match str::from_utf8(entry_type_string_raw.as_slice()) {
+    let entry_type_length = u32::from_le_bytes(no_data_err_if_none!(next_chunk(file)));
+    let entry_type_string_raw =
+        no_data_err_if_none!(next_chunk_slice(file, entry_type_length as usize));
+    let entry_type_string = match str::from_utf8(entry_type_string_raw) {
         Ok(s) => s,
         Err(_) => {
             return Err(WpilogReadErrors::InvalidRecoard {
@@ -111,8 +120,9 @@ fn process_start_recoard(
 
     let entry_type = DataType::from_str(entry_type_string)?;
 
-    let entry_metadata_length = u32::from_le_bytes(next_chunk(file)?);
-    let entry_metadata_raw = next_chunk_vec(file, entry_metadata_length as usize)?;
+    let entry_metadata_length = u32::from_le_bytes(no_data_err_if_none!(next_chunk(file)));
+    let entry_metadata_raw =
+        no_data_err_if_none!(next_chunk_slice(file, entry_metadata_length as usize));
     let entry_metadata =
         process_metadata(entry_metadata_raw, current_record, entry_id_to_be_started)?;
     let entry_data = EntryMetadata::new(
@@ -150,13 +160,12 @@ fn process_start_recoard(
     Ok(record_data)
 }
 
-fn process_finish_recoard(
-    file: &mut (Vec<u8>, usize),
+fn process_finish_recoard<'a>(
+    file: &mut &[u8],
     current_record: u32,
     entry_lut: &mut HashMap<u32, Entry>,
-) -> Result<RecordData, WpilogReadErrors> {
-    println!("finish rec");
-    let entry_id_to_be_finished = u32::from_le_bytes(next_chunk(file)?);
+) -> Result<RecordData<'a>, WpilogReadErrors> {
+    let entry_id_to_be_finished = u32::from_le_bytes(no_data_err_if_none!(next_chunk(file)));
 
     let entry = match match entry_lut.get_mut(&entry_id_to_be_finished) {
         None => {
@@ -191,15 +200,16 @@ fn process_finish_recoard(
         entry_to_be_finished: entry_id_to_be_finished,
     }))
 }
-fn process_set_metadata_recoard(
-    file: &mut (Vec<u8>, usize),
-    entry_lut: &mut HashMap<u32, Entry>,
+fn process_set_metadata_recoard<'a>(
+    file: &mut &'a [u8],
+    entry_lut: &mut HashMap<u32, Entry<'a>>,
     current_record: u32,
-) -> Result<RecordData, WpilogReadErrors> {
-    let entry_id_to_set_metadata = u32::from_le_bytes(next_chunk(file)?);
+) -> Result<RecordData<'a>, WpilogReadErrors> {
+    let entry_id_to_set_metadata = u32::from_le_bytes(no_data_err_if_none!(next_chunk(file)));
 
-    let entry_metadata_length = u32::from_le_bytes(next_chunk(file)?);
-    let entry_metadata_raw = next_chunk_vec(file, entry_metadata_length as usize)?;
+    let entry_metadata_length = u32::from_le_bytes(no_data_err_if_none!(next_chunk(file)));
+    let entry_metadata_raw =
+        no_data_err_if_none!(next_chunk_slice(file, entry_metadata_length as usize));
     let entry_metadata =
         process_metadata(entry_metadata_raw, current_record, entry_id_to_set_metadata)?;
 

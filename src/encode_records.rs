@@ -2,7 +2,7 @@ use crate::{records::Record, shared::WpilogReadErrors};
 
 pub fn record_to_bytes(record: &Record) -> Result<Vec<u8>, WpilogReadErrors> {
     let mut out: Vec<u8> = vec![];
-    let mut payload = record.data.to_bytes()?;
+    let payload = record.data.to_bytes()?;
     let payload_size = payload.len() as u32;
     let bit_field_lengths = get_header_bit_field_lengths(record, &payload_size)?;
 
@@ -20,7 +20,7 @@ pub fn record_to_bytes(record: &Record) -> Result<Vec<u8>, WpilogReadErrors> {
         record.timestamp.as_micros() as u64,
         bit_field_lengths.timestamp_length,
     ));
-    out.append(&mut payload);
+    out.append(&mut payload.to_vec());
 
     Ok(out)
 }
