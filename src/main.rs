@@ -54,9 +54,7 @@ fn main() {
             let mut file_content = Vec::new();
             file.read_to_end(&mut file_content).unwrap();
             let wpilog = read_wpilog(file_content.as_slice()).unwrap();
-            println!("{}", path_str);
             for (_, entry) in wpilog.entry_lut {
-                //println!("metadata:{:?}", entry.meta_data);
                 for record in &entry.records {
                     _ = record_to_bytes(&record);
                 }

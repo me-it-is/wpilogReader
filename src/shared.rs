@@ -1,16 +1,5 @@
 use thiserror::Error;
 
-macro_rules! err_if_none {
-    ($val:expr, $err:expr) => {
-        match $val {
-            None => return Err($err),
-            Some(d) => d,
-        }
-    };
-}
-
-pub(crate) use err_if_none;
-
 macro_rules! no_data_err_if_none {
     ($val:expr) => {
         match $val {

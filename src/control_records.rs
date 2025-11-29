@@ -127,7 +127,7 @@ fn process_start_recoard<'a>(
         process_metadata(entry_metadata_raw, current_record, entry_id_to_be_started)?;
     let entry_data = EntryMetadata::new(
         current_record,
-        entry_name.clone(),
+        entry_name,
         entry_type.clone(),
         entry_metadata.clone(),
     );
