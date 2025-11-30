@@ -12,6 +12,7 @@ mod records;
 mod shared;
 use encode_records::record_to_bytes;
 use headers::{FileHeader, read_header};
+use rayon::prelude::*;
 use records::{Entry, read_next_record};
 use shared::WpilogReadErrors;
 
@@ -42,12 +43,17 @@ fn read_wpilog<'a>(data: &'a [u8]) -> Result<Wpilog<'a>, WpilogReadErrors> {
 fn main() {
     let mut wpilog_path = dirs::home_dir().unwrap();
     wpilog_path.push("Documents/code/robotics/wpilogReader/tests");
-    let paths = read_dir(wpilog_path).unwrap();
-    for path in paths {
-        let raw_path_str = path.unwrap().path();
-        let path_str = raw_path_str.to_str().unwrap();
-        if path_str.ends_with(".wpilog") {
-            let mut file = File::open(path_str).unwrap();
+    let paths: Vec<String> = read_dir(wpilog_path)
+        .unwrap()
+        .map(|path| {
+            let path_str = path.unwrap().path();
+            let path_str = path_str.to_str().unwrap();
+            path_str.to_owned()
+        })
+        .collect();
+    paths.par_iter().for_each(|path| {
+        if path.ends_with(".wpilog") {
+            let mut file = File::open(path).unwrap();
             let mut file_content = Vec::new();
             file.read_to_end(&mut file_content).unwrap();
             let wpilog = read_wpilog(file_content.as_slice()).unwrap();
@@ -57,5 +63,5 @@ fn main() {
                 }
             }
         }
-    }
+    });
 }
