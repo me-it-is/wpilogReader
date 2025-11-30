@@ -60,6 +60,7 @@ pub fn next_chunk_slice<'a>(file: &mut &'a [u8], size: usize) -> Option<&'a [u8]
     *file = remaining_file;
     Some(out)
 }
+
 pub fn bool_to_byte(bool: &bool) -> u8 {
     match bool {
         true => 1,

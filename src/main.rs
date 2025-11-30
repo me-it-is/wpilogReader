@@ -16,7 +16,6 @@ use rayon::prelude::*;
 use records::{Entry, read_next_record};
 use shared::WpilogReadErrors;
 
-#[allow(dead_code)]
 struct Wpilog<'a> {
     header: FileHeader,
     entry_lut: HashMap<u32, Entry<'a>>,

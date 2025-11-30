@@ -9,7 +9,6 @@ use crate::shared::{
     WpilogReadErrors, bool_to_byte, next_chunk, next_chunk_slice, no_data_err_if_none,
     pad_to_n_bytes,
 };
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct EntryMetadata<'a> {
     pub start_record_index: u32,
@@ -35,7 +34,6 @@ impl EntryMetadata<'_> {
         }
     }
 }
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Entry<'a> {
     pub meta_data: Vec<EntryMetadata<'a>>,
@@ -46,7 +44,7 @@ impl Entry<'_> {
         Entry { meta_data, records }
     }
 }
-#[allow(dead_code)]
+
 #[derive(Debug, Clone)]
 pub struct Metadata<'a> {
     pub metadata: &'a str,
@@ -61,14 +59,13 @@ impl Metadata<'_> {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Record<'a> {
     pub entry_id: u32,
     pub timestamp: Duration,
     pub data: RecordData<'a>,
 }
-#[allow(dead_code)]
+
 #[derive(Debug)]
 pub enum RecordData<'a> {
     Start(StartRecordData<'a>),
@@ -124,6 +121,7 @@ impl RecordData<'_> {
         Ok(bytes)
     }
 }
+
 fn convert_array_to_bytes<T: Clone, const DATA_SIZE: usize>(
     array: &[T],
     from_func: &dyn Fn(T) -> [u8; DATA_SIZE],
@@ -149,8 +147,8 @@ fn convert_string_array_to_bytes(array: &[&str]) -> Vec<u8> {
 const STRUCT_STR: &str = "struct:";
 const PROTOBUFF_STR: &str = "proto:";
 const PHOTONSTRUCT_STR: &str = "photonstruct:";
+
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum DataType {
     Raw,
     Boolean,
@@ -214,6 +212,7 @@ impl DataType {
         }
     }
 }
+
 fn process_structs_and_stuff_type_from_string(str: &str) -> Result<DataType, WpilogReadErrors> {
     if str.starts_with(STRUCT_STR) {
         if str.ends_with("[]") {

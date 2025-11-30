@@ -1,6 +1,5 @@
 use crate::shared::{WpilogReadErrors, next_chunk, next_chunk_slice, no_data_err_if_none};
 
-#[allow(dead_code)]
 pub struct FileHeader {
     version_number: u16,
     extra_string: String,

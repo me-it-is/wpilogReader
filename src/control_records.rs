@@ -7,7 +7,7 @@ pub enum ControlTypes {
     Finish,
     SetMetadata,
 }
-#[allow(dead_code)]
+
 #[derive(Debug)]
 pub struct StartRecordData<'a> {
     entry_id_to_be_started: u32,
@@ -15,6 +15,7 @@ pub struct StartRecordData<'a> {
     entry_type: DataType,
     entry_metadata: Metadata<'a>,
 }
+
 impl StartRecordData<'_> {
     pub fn to_bytes(&self) -> Result<Vec<u8>, WpilogReadErrors> {
         let out = [
@@ -28,7 +29,6 @@ impl StartRecordData<'_> {
         Ok(out)
     }
 }
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct FinishRecordData {
     entry_to_be_finished: u32,
@@ -38,7 +38,7 @@ impl FinishRecordData {
         [&[1], self.entry_to_be_finished.to_le_bytes().as_slice()].concat()
     }
 }
-#[allow(dead_code)]
+
 #[derive(Debug)]
 pub struct SetMetaDataRecordData<'a> {
     entry_to_be_edited: u32,
@@ -199,6 +199,7 @@ fn process_finish_recoard<'a>(
         entry_to_be_finished: entry_id_to_be_finished,
     }))
 }
+
 fn process_set_metadata_recoard<'a>(
     file: &mut &'a [u8],
     entry_lut: &mut HashMap<u32, Entry<'a>>,
