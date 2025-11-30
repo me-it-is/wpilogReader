@@ -24,9 +24,8 @@ pub fn read_header(file: &mut &[u8]) -> Result<FileHeader, WpilogReadErrors> {
 
     let extra_string_length = u32::from_le_bytes(no_data_err_if_none!(next_chunk(file)));
 
-    let extra_string_raw =
-        no_data_err_if_none!(next_chunk_slice(file, extra_string_length as usize));
-    let extra_string = match str::from_utf8(extra_string_raw) {
+    let extra_string = no_data_err_if_none!(next_chunk_slice(file, extra_string_length as usize));
+    let extra_string = match str::from_utf8(extra_string) {
         Ok(s) => s,
         Err(_) => return Err(WpilogReadErrors::InvalidHeader),
     }

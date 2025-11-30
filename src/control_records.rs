@@ -61,11 +61,12 @@ pub fn process_control_record<'a>(
     current_record: u32,
     entry_lut: &mut HashMap<u32, Entry<'a>>,
 ) -> Result<RecordData<'a>, WpilogReadErrors> {
-    let raw_control_type = match next_chunk::<1>(file) {
+    let control_type = match next_chunk::<1>(file) {
         Some(value) => value[0],
         None => return Err(WpilogReadErrors::NoDataLeft),
     };
-    let control_type = match raw_control_type {
+
+    let control_type = match control_type {
         0 => ControlTypes::Start,
         1 => ControlTypes::Finish,
         2 => ControlTypes::SetMetadata,
@@ -80,7 +81,7 @@ pub fn process_control_record<'a>(
     match control_type {
         ControlTypes::Start => process_start_recoard(file, current_record, entry_lut),
         ControlTypes::Finish => process_finish_recoard(file, current_record, entry_lut),
-        ControlTypes::SetMetadata => process_set_metadata_recoard(file, entry_lut, current_record),
+        ControlTypes::SetMetadata => process_set_metadata_recoard(file, current_record, entry_lut),
     }
 }
 
@@ -92,9 +93,8 @@ fn process_start_recoard<'a>(
     let entry_id_to_be_started = u32::from_le_bytes(no_data_err_if_none!(next_chunk(file)));
 
     let entry_name_length = u32::from_le_bytes(no_data_err_if_none!(next_chunk(file)));
-    let entry_name_string_raw =
-        no_data_err_if_none!(next_chunk_slice(file, entry_name_length as usize));
-    let entry_name = match str::from_utf8(entry_name_string_raw) {
+    let entry_name = no_data_err_if_none!(next_chunk_slice(file, entry_name_length as usize));
+    let entry_name = match str::from_utf8(entry_name) {
         Ok(s) => s,
         Err(_) => {
             return Err(WpilogReadErrors::InvalidRecoard {
@@ -105,9 +105,8 @@ fn process_start_recoard<'a>(
     };
 
     let entry_type_length = u32::from_le_bytes(no_data_err_if_none!(next_chunk(file)));
-    let entry_type_string_raw =
-        no_data_err_if_none!(next_chunk_slice(file, entry_type_length as usize));
-    let entry_type_string = match str::from_utf8(entry_type_string_raw) {
+    let entry_type = no_data_err_if_none!(next_chunk_slice(file, entry_type_length as usize));
+    let entry_type = match str::from_utf8(entry_type) {
         Ok(s) => s,
         Err(_) => {
             return Err(WpilogReadErrors::InvalidRecoard {
@@ -117,13 +116,12 @@ fn process_start_recoard<'a>(
         }
     };
 
-    let entry_type = DataType::from_str(entry_type_string)?;
+    let entry_type = DataType::from_str(entry_type)?;
 
     let entry_metadata_length = u32::from_le_bytes(no_data_err_if_none!(next_chunk(file)));
-    let entry_metadata_raw =
-        no_data_err_if_none!(next_chunk_slice(file, entry_metadata_length as usize));
     let entry_metadata =
-        process_metadata(entry_metadata_raw, current_record, entry_id_to_be_started)?;
+        no_data_err_if_none!(next_chunk_slice(file, entry_metadata_length as usize));
+    let entry_metadata = process_metadata(entry_metadata, current_record, entry_id_to_be_started)?;
     let entry_data = EntryMetadata::new(
         current_record,
         entry_name,
@@ -149,6 +147,7 @@ fn process_start_recoard<'a>(
             current.meta_data[last_index] = entry_data
         }
     }
+
     let record_data = RecordData::Start(StartRecordData {
         entry_id_to_be_started,
         entry_name,
@@ -202,16 +201,16 @@ fn process_finish_recoard<'a>(
 
 fn process_set_metadata_recoard<'a>(
     file: &mut &'a [u8],
-    entry_lut: &mut HashMap<u32, Entry<'a>>,
     current_record: u32,
+    entry_lut: &mut HashMap<u32, Entry<'a>>,
 ) -> Result<RecordData<'a>, WpilogReadErrors> {
     let entry_id_to_set_metadata = u32::from_le_bytes(no_data_err_if_none!(next_chunk(file)));
 
     let entry_metadata_length = u32::from_le_bytes(no_data_err_if_none!(next_chunk(file)));
-    let entry_metadata_raw =
+    let entry_metadata =
         no_data_err_if_none!(next_chunk_slice(file, entry_metadata_length as usize));
     let entry_metadata =
-        process_metadata(entry_metadata_raw, current_record, entry_id_to_set_metadata)?;
+        process_metadata(entry_metadata, current_record, entry_id_to_set_metadata)?;
 
     let entry = match match entry_lut.get_mut(&entry_id_to_set_metadata) {
         None => {

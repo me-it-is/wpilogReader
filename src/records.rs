@@ -282,16 +282,17 @@ pub fn read_next_record<'a>(
         ((header_bit_field & 0b000011) + 1) as usize,
     ))));
 
-    let raw_payload_size = pad_to_n_bytes(no_data_err_if_none!(next_chunk_slice(
+    let payload_size = pad_to_n_bytes(no_data_err_if_none!(next_chunk_slice(
         file,
         (((header_bit_field & 0b00001100) >> 2) + 1) as usize,
     )));
-    let payload_size = u32::from_le_bytes(raw_payload_size);
+    let payload_size = u32::from_le_bytes(payload_size);
 
-    let time_stamp_microseconds = u64::from_le_bytes(pad_to_n_bytes(no_data_err_if_none!(
-        next_chunk_slice(file, (((header_bit_field & 0b01110000) >> 4) + 1) as usize,)
-    )));
-    let time_stamp = Duration::from_micros(time_stamp_microseconds);
+    let time_stamp = u64::from_le_bytes(pad_to_n_bytes(no_data_err_if_none!(next_chunk_slice(
+        file,
+        (((header_bit_field & 0b01110000) >> 4) + 1) as usize,
+    ))));
+    let time_stamp = Duration::from_micros(time_stamp);
 
     let data = if entry_id == 0 {
         process_control_record(file, current_record, entry_lut)?
@@ -420,8 +421,8 @@ fn process_boolean_array_data(
     current_record: u32,
     entry_id: u32,
 ) -> Result<&[bool], WpilogReadErrors> {
-    for d in data {
-        if !(*d == 0 || *d == 1) {
+    for byte in data {
+        if !(*byte == 0 || *byte == 1) {
             return Err(WpilogReadErrors::MalformedData {
                 record_num: current_record,
                 entry_id,
@@ -441,15 +442,17 @@ fn process_array_data<T, const DATA_SIZE: usize>(
     let mut out = Vec::with_capacity(data.len() / DATA_SIZE);
     let mut entries = data.chunks_exact(DATA_SIZE);
 
-    for e in entries.by_ref() {
-        out.push(from_func(e.try_into().unwrap()));
-    }
     if !entries.remainder().is_empty() {
         return Err(WpilogReadErrors::MalformedData {
             record_num: current_record,
             entry_id,
         });
     }
+
+    for e in entries.by_ref() {
+        out.push(from_func(e.try_into().unwrap()));
+    }
+
     Ok(out)
 }
 
