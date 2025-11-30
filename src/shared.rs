@@ -34,7 +34,7 @@ pub enum WpilogReadErrors {
     #[error("record {record_num} tried to finish entry {entry_id} before a start entry")]
     FinishWithoutStart { record_num: u32, entry_id: u32 },
     #[error("cant decode a record")]
-    CantEncodeRecord,
+    _CantEncodeRecord,
 }
 pub fn pad_to_n_bytes<const SIZE: usize>(data: &[u8]) -> [u8; SIZE] {
     let mut arr: [u8; SIZE] = [0; SIZE];
@@ -49,20 +49,14 @@ pub fn pad_to_n_bytes<const SIZE: usize>(data: &[u8]) -> [u8; SIZE] {
 
 pub fn next_chunk<const SIZE: usize>(file: &mut &[u8]) -> Option<[u8; SIZE]> {
     let split = file.split_first_chunk();
-    let (out, remaining_file) = match split {
-        None => return None,
-        Some(d) => d,
-    };
+    let (out, remaining_file) = split?;
     *file = remaining_file;
     Some(*out)
 }
 
 pub fn next_chunk_slice<'a>(file: &mut &'a [u8], size: usize) -> Option<&'a [u8]> {
     let split = file.split_at_checked(size);
-    let (out, remaining_file) = match split {
-        None => return None,
-        Some(d) => d,
-    };
+    let (out, remaining_file) = split?;
     *file = remaining_file;
     Some(out)
 }

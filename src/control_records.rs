@@ -77,12 +77,11 @@ pub fn process_control_record<'a>(
         }
     };
 
-    let out = match control_type {
+    match control_type {
         ControlTypes::Start => process_start_recoard(file, current_record, entry_lut),
         ControlTypes::Finish => process_finish_recoard(file, current_record, entry_lut),
         ControlTypes::SetMetadata => process_set_metadata_recoard(file, entry_lut, current_record),
-    };
-    out
+    }
 }
 
 fn process_start_recoard<'a>(

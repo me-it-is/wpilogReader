@@ -36,10 +36,7 @@ fn read_wpilog<'a>(data: &'a [u8]) -> Result<Wpilog<'a>, WpilogReadErrors> {
         record_num += 1;
     }
 
-    Ok(Wpilog {
-        header,
-        entry_lut: entry_lut,
-    })
+    Ok(Wpilog { header, entry_lut })
 }
 
 fn main() {
@@ -56,7 +53,7 @@ fn main() {
             let wpilog = read_wpilog(file_content.as_slice()).unwrap();
             for (_, entry) in wpilog.entry_lut {
                 for record in &entry.records {
-                    _ = record_to_bytes(&record);
+                    _ = record_to_bytes(record);
                 }
             }
         }

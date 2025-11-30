@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use bytemuck::{AnyBitPattern, try_cast_slice};
-
 use crate::control_records::{
     FinishRecordData, SetMetaDataRecordData, StartRecordData, process_control_record,
 };
@@ -96,7 +94,7 @@ pub enum RecordData<'a> {
     Other(&'a [u8]),
 }
 impl RecordData<'_> {
-    pub fn to_bytes<'a>(&'a self) -> Result<Vec<u8>, WpilogReadErrors> {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, WpilogReadErrors> {
         let bytes = match self {
             RecordData::Start(d) => d.to_bytes()?,
             RecordData::Finish(d) => d.to_bytes(),
@@ -126,7 +124,7 @@ impl RecordData<'_> {
         Ok(bytes)
     }
 }
-fn convert_array_to_bytes<'a, T: Clone, const DATA_SIZE: usize>(
+fn convert_array_to_bytes<T: Clone, const DATA_SIZE: usize>(
     array: &[T],
     from_func: &dyn Fn(T) -> [u8; DATA_SIZE],
 ) -> Vec<u8> {
@@ -137,7 +135,7 @@ fn convert_array_to_bytes<'a, T: Clone, const DATA_SIZE: usize>(
     out
 }
 
-fn convert_string_array_to_bytes<'a>(array: &'a [&str]) -> Vec<u8> {
+fn convert_string_array_to_bytes(array: &[&str]) -> Vec<u8> {
     let mut out = vec![];
 
     for str in array {
@@ -193,7 +191,7 @@ impl DataType {
         };
         Ok(data_type)
     }
-    pub fn to_str(&self) -> String {
+    pub fn _to_str(&self) -> String {
         match self {
             DataType::Raw => "raw".to_string(),
             DataType::Boolean => "boolean".to_string(),
@@ -418,11 +416,11 @@ fn process_data_from_standard_record<'a>(
     Ok(data_type)
 }
 
-fn process_boolean_array_data<'a>(
-    data: &'a [u8],
+fn process_boolean_array_data(
+    data: &[u8],
     current_record: u32,
     entry_id: u32,
-) -> Result<&'a [bool], WpilogReadErrors> {
+) -> Result<&[bool], WpilogReadErrors> {
     for d in data {
         if !(*d == 0 || *d == 1) {
             return Err(WpilogReadErrors::MalformedData {
