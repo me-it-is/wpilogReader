@@ -33,8 +33,14 @@ pub enum WpilogReadErrors {
     SetMetadataWithoutStart { record_num: u32, entry_id: u32 },
     #[error("record {record_num} tried to finish entry {entry_id} before a start entry")]
     FinishWithoutStart { record_num: u32, entry_id: u32 },
-    #[error("cant decode a record")]
-    _CantEncodeRecord,
+}
+
+#[derive(Debug, Error)]
+pub enum WpilogEncodeErrors {
+    #[error("cant encode a record")]
+    CantEncodeRecord,
+    #[error("wpilog version {major_version}.{minor_version} unsupported", major_version = (version | 0x00ff) / 0xff, minor_version = version | 0xff00)]
+    UnsupportedWpilogVersion { version: u16 },
 }
 pub fn pad_to_n_bytes<const SIZE: usize>(data: &[u8]) -> [u8; SIZE] {
     let mut arr: [u8; SIZE] = [0; SIZE];

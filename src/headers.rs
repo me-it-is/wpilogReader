@@ -1,8 +1,8 @@
 use crate::shared::{WpilogReadErrors, next_chunk, next_chunk_slice, no_data_err_if_none};
 
 pub struct FileHeader {
-    version_number: u16,
-    extra_string: String,
+    pub version_number: u16,
+    pub extra_string: String,
 }
 
 pub fn read_header(file: &mut &[u8]) -> Result<FileHeader, WpilogReadErrors> {

@@ -12,8 +12,8 @@ use crate::shared::{
 #[derive(Debug, Clone)]
 pub struct EntryMetadata<'a> {
     pub start_record_index: u32,
-    name: &'a str,
-    data_type: DataType,
+    pub name: &'a str,
+    pub data_type: DataType,
     pub metadata: Metadata<'a>,
     pub finish_record_index: Option<u32>,
 }
@@ -185,7 +185,7 @@ impl DataType {
             "string[]" => DataType::StringArray,
             "json" => DataType::Json,
             "msgpack" => DataType::MessagePack,
-            _ => process_structs_and_stuff_type_from_string(str)?,
+            _ => process_other_data_types_from_str(str)?,
         };
         Ok(data_type)
     }
@@ -213,7 +213,7 @@ impl DataType {
     }
 }
 
-fn process_structs_and_stuff_type_from_string(str: &str) -> Result<DataType, WpilogReadErrors> {
+fn process_other_data_types_from_str(str: &str) -> Result<DataType, WpilogReadErrors> {
     if str.starts_with(STRUCT_STR) {
         if str.ends_with("[]") {
             let mut string = str.split_at(STRUCT_STR.len()).1.to_string();

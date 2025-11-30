@@ -6,15 +6,19 @@ use std::{
 };
 
 mod control_records;
+mod encode_headers;
 mod encode_records;
 mod headers;
 mod records;
 mod shared;
+use encode_headers::encode_header;
 use encode_records::record_to_bytes;
 use headers::{FileHeader, read_header};
 use rayon::prelude::*;
 use records::{Entry, read_next_record};
 use shared::WpilogReadErrors;
+
+use crate::shared::WpilogEncodeErrors;
 
 struct Wpilog<'a> {
     header: FileHeader,
@@ -39,6 +43,17 @@ fn read_wpilog<'a>(data: &'a [u8]) -> Result<Wpilog<'a>, WpilogReadErrors> {
     Ok(Wpilog { header, entry_lut })
 }
 
+fn encode_wpilog(wpilog: &Wpilog) -> Result<Vec<u8>, WpilogEncodeErrors> {
+    let mut out = vec![];
+    out.extend_from_slice(&encode_header(&wpilog.header)?);
+
+    let entry_lut = &wpilog.entry_lut;
+
+    for (entry_id, entry) in entry_lut {}
+
+    Ok(out)
+}
+
 fn main() {
     let mut wpilog_path = dirs::home_dir().unwrap();
     wpilog_path.push("Documents/code/robotics/wpilogReader/tests");
@@ -56,11 +71,6 @@ fn main() {
             let mut file_content = Vec::new();
             file.read_to_end(&mut file_content).unwrap();
             let wpilog = read_wpilog(file_content.as_slice()).unwrap();
-            for (_, entry) in wpilog.entry_lut {
-                for record in &entry.records {
-                    _ = record_to_bytes(record);
-                }
-            }
         }
     });
 }
