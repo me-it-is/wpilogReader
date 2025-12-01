@@ -11,37 +11,47 @@ use crate::shared::{
 };
 #[derive(Debug, Clone)]
 pub struct EntryMetadata<'a> {
-    pub start_record_index: u32,
     pub name: &'a str,
     pub data_type: DataType,
     pub metadata: Metadata<'a>,
-    pub finish_record_index: Option<u32>,
+    pub finished: bool,
 }
 
 impl EntryMetadata<'_> {
     pub fn new<'a>(
-        start_record_index: u32,
         name: &'a str,
         data_type: DataType,
         metadata: Metadata<'a>,
     ) -> EntryMetadata<'a> {
         EntryMetadata {
-            start_record_index,
             name,
             data_type,
             metadata,
-            finish_record_index: None,
+            finished: false,
         }
     }
 }
 #[derive(Debug)]
 pub struct Entry<'a> {
-    pub meta_data: Vec<EntryMetadata<'a>>,
-    pub records: Vec<Record<'a>>,
+    pub sub_entries: Vec<SubEntry<'a>>,
 }
 impl Entry<'_> {
-    pub fn new<'a>(meta_data: Vec<EntryMetadata<'a>>, records: Vec<Record<'a>>) -> Entry<'a> {
-        Entry { meta_data, records }
+    pub fn new<'a>(sub_entries: Vec<SubEntry<'a>>) -> Entry<'a> {
+        Entry { sub_entries }
+    }
+}
+
+#[derive(Debug)]
+pub struct SubEntry<'a> {
+    pub records: Vec<Record<'a>>,
+    pub entry_metadata: EntryMetadata<'a>,
+}
+impl SubEntry<'_> {
+    pub fn new<'a>(records: Vec<Record<'a>>, entry_metadata: EntryMetadata<'a>) -> SubEntry<'a> {
+        SubEntry {
+            records,
+            entry_metadata,
+        }
     }
 }
 
@@ -243,31 +253,34 @@ fn get_current_entry_data<'a>(
     current_record: u32,
     entry_id: u32,
 ) -> Result<&'a EntryMetadata<'a>, WpilogReadErrors> {
-    let current_id_data = match entry_lut.get(&entry_id) {
-        Some(l) => &l.meta_data,
+    match entry_lut.get(&entry_id) {
+        Some(entry) => {
+            if entry.sub_entries.len() == 0 {
+                return Err(WpilogReadErrors::UseOfEntryIdWithoutStart {
+                    record_num: current_record,
+                    entry_id,
+                });
+            }
+
+            if entry.sub_entries[entry.sub_entries.len() - 1]
+                .entry_metadata
+                .finished
+            {
+                return Err(WpilogReadErrors::UseOfEntryIdAfterFinish {
+                    record_num: current_record,
+                    entry_id,
+                });
+            }
+
+            return Ok(&entry.sub_entries[entry.sub_entries.iter().len() - 1].entry_metadata);
+        }
         None => {
             return Err(WpilogReadErrors::UseOfEntryIdWithoutStart {
                 record_num: current_record,
                 entry_id,
             });
         }
-    };
-
-    for data in current_id_data {
-        match data.finish_record_index {
-            None => return Ok(data),
-            Some(i) => {
-                if i < current_record {
-                    return Ok(data);
-                }
-            }
-        }
     }
-
-    Err(WpilogReadErrors::UseOfEntryIdAfterFinish {
-        record_num: current_record,
-        entry_id,
-    })
 }
 
 pub fn read_next_record<'a>(
@@ -314,7 +327,7 @@ pub fn read_next_record<'a>(
 
     if entry_id != 0 {
         match entry_lut.get_mut(&entry_id) {
-            Some(r) => r.records.push(record),
+            Some(entry) => entry.sub_entries.last_mut().unwrap().records.push(record),
             None => {
                 return Err(WpilogReadErrors::UseOfEntryIdWithoutStart {
                     record_num: current_record,
